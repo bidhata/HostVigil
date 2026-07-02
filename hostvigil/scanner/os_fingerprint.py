@@ -557,7 +557,9 @@ class OSFingerprinter:
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.execute(
-                "SELECT banner FROM scan_results WHERE ip = ? AND banner IS NOT NULL AND banner != ''",
+                "SELECT p.banner FROM ports p "
+                "JOIN hosts h ON h.id = p.host_id "
+                "WHERE h.ip = ? AND p.banner IS NOT NULL AND p.banner != '' AND p.is_active = 1",
                 (ip,),
             )
             rows = cursor.fetchall()
@@ -593,11 +595,18 @@ class OSFingerprinter:
         """
         try:
             conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute(
-                "SELECT ttl FROM scan_results WHERE ip = ? AND ttl IS NOT NULL ORDER BY timestamp DESC LIMIT 5",
-                (ip,),
-            )
-            rows = cursor.fetchall()
+            # TTL data may be stored if active probing was done; check ports table
+            # for any TTL column or fall back gracefully
+            try:
+                cursor = conn.execute(
+                    "SELECT ttl FROM ports p JOIN hosts h ON h.id = p.host_id "
+                    "WHERE h.ip = ? AND p.ttl IS NOT NULL ORDER BY p.last_seen DESC LIMIT 5",
+                    (ip,),
+                )
+                rows = cursor.fetchall()
+            except sqlite3.OperationalError:
+                # ttl column doesn't exist in ports table — that's OK
+                rows = []
             conn.close()
         except sqlite3.Error as e:
             logger.debug(f"DB error fetching TTL for {ip}: {e}")
@@ -740,19 +749,14 @@ class OSFingerprinter:
 
     def _store_fingerprint(self, ip: str, os_name: str, confidence: float, method: str, details: dict):
         """Store OS fingerprint result in the hosts table."""
-        fingerprint_data = json.dumps({
-            'os': os_name,
-            'confidence': confidence,
-            'method': method,
-            'details': details,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-        })
+        # Store plain OS name string for dashboard display
+        display_name = os_name if os_name and os_name != 'Unknown' else None
 
         try:
             conn = sqlite3.connect(self.db_path)
             conn.execute(
-                "UPDATE hosts SET os_fingerprint = ?, os_confidence = ? WHERE ip = ?",
-                (fingerprint_data, confidence, ip),
+                "UPDATE hosts SET os_fingerprint = ?, os_confidence = ?, last_seen = ? WHERE ip = ?",
+                (display_name, confidence, datetime.now(timezone.utc).isoformat(), ip),
             )
             conn.commit()
             conn.close()
@@ -765,7 +769,9 @@ class OSFingerprinter:
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.execute(
-                "SELECT port FROM scan_results WHERE ip = ? AND state = 'open'",
+                "SELECT p.port FROM ports p "
+                "JOIN hosts h ON h.id = p.host_id "
+                "WHERE h.ip = ? AND p.state = 'open' AND p.is_active = 1",
                 (ip,),
             )
             ports = [row[0] for row in cursor.fetchall()]
@@ -776,15 +782,28 @@ class OSFingerprinter:
             return []
 
     def _get_active_hosts(self) -> List[Tuple[str, Optional[str]]]:
-        """Retrieve all active hosts from the database."""
+        """Retrieve all active hosts with their open ports from the database."""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.execute(
-                "SELECT ip, open_ports FROM hosts WHERE status = 'active' OR status = 'up'"
+                "SELECT h.ip, GROUP_CONCAT(p.port) as ports "
+                "FROM hosts h "
+                "LEFT JOIN ports p ON p.host_id = h.id AND p.state = 'open' AND p.is_active = 1 "
+                "WHERE h.is_active = 1 "
+                "GROUP BY h.id"
             )
-            hosts = cursor.fetchall()
+            # Return as list of (ip, json_ports_string)
+            results = []
+            for row in cursor.fetchall():
+                ip = row[0]
+                ports_csv = row[1]
+                if ports_csv:
+                    ports_list = [int(p) for p in ports_csv.split(',')]
+                    results.append((ip, json.dumps(ports_list)))
+                else:
+                    results.append((ip, None))
             conn.close()
-            return hosts
+            return results
         except sqlite3.Error as e:
             logger.error(f"DB error fetching active hosts: {e}")
             return []

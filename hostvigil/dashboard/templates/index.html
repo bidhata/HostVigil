@@ -1,394 +1,70 @@
 {% extends "base.html" %}
 
 {% block title %}Overview{% endblock %}
-{% block page_title %}Network Overview{% endblock %}
-{% block breadcrumb %}
-<li class="breadcrumb-item active" aria-current="page">Overview</li>
-{% endblock %}
-
-{% block head_extra %}
-<style>
-    .attention-card {
-        border-radius: 8px;
-        padding: 14px 18px;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 10px;
-        font-size: 0.9rem;
-    }
-    .attention-card-critical {
-        background: rgba(220, 53, 69, 0.08);
-        border: 1px solid rgba(220, 53, 69, 0.25);
-        color: #dc3545;
-    }
-    .attention-card-warning {
-        background: rgba(255, 152, 0, 0.08);
-        border: 1px solid rgba(255, 152, 0, 0.25);
-        color: #e65100;
-    }
-    .attention-card-info {
-        background: rgba(0, 136, 204, 0.08);
-        border: 1px solid rgba(0, 136, 204, 0.25);
-        color: #0088cc;
-    }
-    .attention-card i { font-size: 1.3rem; }
-    .attention-card a {
-        margin-left: auto;
-        font-weight: 600;
-        text-decoration: none;
-        white-space: nowrap;
-    }
-    .attention-card-critical a { color: #dc3545; }
-    .attention-card-warning a { color: #e65100; }
-    .attention-card-info a { color: #0088cc; }
-
-    .primary-stat-card {
-        border-radius: 10px;
-        padding: 24px 20px;
-        background: var(--card-bg, #fff);
-        border: 1px solid var(--border-color, #e9ecef);
-        border-left: 4px solid;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-    .primary-stat-card .stat-number {
-        font-size: 2.4rem;
-        font-weight: 700;
-        line-height: 1.1;
-    }
-    .primary-stat-card .stat-label {
-        font-size: 0.82rem;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        opacity: 0.7;
-        font-weight: 600;
-    }
-    .primary-stat-card.accent-red { border-left-color: #dc3545; }
-    .primary-stat-card.accent-red .stat-number { color: #dc3545; }
-    .primary-stat-card.accent-orange { border-left-color: #fd7e14; }
-    .primary-stat-card.accent-orange .stat-number { color: #fd7e14; }
-    .primary-stat-card.accent-purple { border-left-color: #7c3aed; }
-    .primary-stat-card.accent-purple .stat-number { color: #7c3aed; }
-
-    .pipeline-card {
-        background: var(--card-bg, #fff);
-        border: 1px solid var(--border-color, #e9ecef);
-        border-radius: 10px;
-        padding: 16px 20px;
-    }
-    .pipeline-card .pipeline-title {
-        font-size: 0.8rem;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        opacity: 0.6;
-        font-weight: 600;
-        margin-bottom: 12px;
-    }
-    .pipeline-steps {
-        display: flex;
-        align-items: center;
-        gap: 0;
-        flex-wrap: wrap;
-    }
-    .pipeline-step {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
-        border-radius: 20px;
-        font-size: 0.78rem;
-        font-weight: 500;
-        background: rgba(0,0,0,0.03);
-        white-space: nowrap;
-    }
-    .pipeline-step.done { color: #28a745; background: rgba(40,167,69,0.08); }
-    .pipeline-step.running { color: #0088cc; background: rgba(0,136,204,0.1); }
-    .pipeline-step.pending { color: #999; background: rgba(0,0,0,0.03); }
-    .pipeline-step .step-icon { font-size: 0.85rem; }
-    .pipeline-arrow { color: #ccc; font-size: 0.7rem; margin: 0 4px; }
-</style>
-{% endblock %}
+{% block page_title %}Overview{% endblock %}
 
 {% block content %}
-<!-- 1. NEEDS ATTENTION SECTION -->
-{% set crit_high = stats.vulnerabilities.critical + stats.vulnerabilities.high %}
-{% if crit_high > 0 or stats.active_anomalies > 0 or (stats.total_ports == 0 and stats.total_hosts > 0) or stats.total_hosts == 0 %}
-<div class="mb-3">
-    {% if crit_high > 0 %}
-    <div class="attention-card attention-card-critical">
-        <i class="bi bi-exclamation-octagon-fill"></i>
-        <span><strong>{{ crit_high }}</strong> critical/high vulnerabilities require attention</span>
-        <a href="{{ url_for('vulnerabilities') }}">View Vulnerabilities &rarr;</a>
+<!-- Key Numbers -->
+<div class="stat-grid">
+    <div class="stat-item">
+        <div class="stat-number" id="stat-hosts">{{ stats.total_hosts | default(0) }}</div>
+        <div class="stat-label">hosts</div>
     </div>
-    {% endif %}
-    {% if stats.active_anomalies > 0 %}
-    <div class="attention-card attention-card-warning">
-        <i class="bi bi-activity"></i>
-        <span><strong>{{ stats.active_anomalies }}</strong> active anomalies detected by ML engine</span>
-        <a href="{{ url_for('anomalies') }}">View Anomalies &rarr;</a>
+    <div class="stat-item">
+        <div class="stat-number" id="stat-ports">{{ stats.total_ports | default(0) }}</div>
+        <div class="stat-label">open ports</div>
     </div>
-    {% endif %}
-    {% if stats.total_ports == 0 and stats.total_hosts > 0 %}
-    <div class="attention-card attention-card-warning">
-        <i class="bi bi-ethernet"></i>
-        <span>No ports scanned yet &mdash; hosts discovered but not port-scanned</span>
-        <a href="{{ url_for('scan_controls') }}">Run TCP Scan &rarr;</a>
+    <div class="stat-item">
+        <div class="stat-number" id="stat-critical">{{ stats.vulnerabilities.critical | default(0) }}</div>
+        <div class="stat-label">critical</div>
     </div>
-    {% endif %}
-    {% if stats.total_hosts == 0 %}
-    <div class="attention-card attention-card-info">
-        <i class="bi bi-search"></i>
-        <span>No hosts discovered yet &mdash; start a discovery scan to map your network</span>
-        <a href="{{ url_for('scan_controls') }}">Start Discovery &rarr;</a>
+    <div class="stat-item">
+        <div class="stat-number" id="stat-anomalies">{{ stats.active_anomalies | default(0) }}</div>
+        <div class="stat-label">anomalies</div>
     </div>
-    {% endif %}
+</div>
+
+<!-- Actionable Alert -->
+{% if stats.total_hosts == 0 %}
+<div class="alert-line">
+    No hosts discovered yet. <a href="{{ url_for('scan_controls') }}">Start discovery</a>
+</div>
+{% elif stats.total_ports == 0 and stats.total_hosts > 0 %}
+<div class="alert-line">
+    No ports scanned yet. {{ stats.total_hosts }} hosts ready for TCP scan. <a href="{{ url_for('scan_controls') }}">Run scan</a>
+</div>
+{% elif stats.vulnerabilities.critical + stats.vulnerabilities.high > 0 %}
+<div class="alert-line">
+    {{ stats.vulnerabilities.critical + stats.vulnerabilities.high }} critical/high vulnerabilities found. <a href="{{ url_for('vulnerabilities') }}">Review</a>
 </div>
 {% endif %}
 
-<!-- 2. PRIMARY STATS ROW -->
-<div class="row g-3 mb-3">
-    <div class="col-lg-4 col-md-4">
-        <div class="primary-stat-card accent-red">
-            <div class="stat-number" id="stat-vulns-critical">{{ stats.vulnerabilities.critical }}</div>
-            <div class="stat-label">Critical Vulnerabilities</div>
-        </div>
-    </div>
-    <div class="col-lg-4 col-md-4">
-        <div class="primary-stat-card accent-orange">
-            <div class="stat-number" id="stat-vulns-high">{{ stats.vulnerabilities.high }}</div>
-            <div class="stat-label">High Vulnerabilities</div>
-        </div>
-    </div>
-    <div class="col-lg-4 col-md-4">
-        <div class="primary-stat-card accent-purple">
-            <div class="stat-number" id="stat-anomalies">{{ stats.active_anomalies }}</div>
-            <div class="stat-label">Active Anomalies</div>
-        </div>
-    </div>
-</div>
-
-<!-- 3. SECONDARY STATS ROW -->
-<div class="row g-3 mb-3">
-    <div class="col-xl-4 col-md-4">
-        <div class="mini-stat-card">
-            <div class="mini-stat-icon bg-primary-subtle">
-                <i class="bi bi-hdd-network"></i>
-            </div>
-            <div class="mini-stat-content">
-                <div class="mini-stat-value" id="stat-hosts">{{ stats.total_hosts }}</div>
-                <div class="mini-stat-label">Total Hosts</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-xl-4 col-md-4">
-        <div class="mini-stat-card">
-            <div class="mini-stat-icon bg-success-subtle">
-                <i class="bi bi-ethernet"></i>
-            </div>
-            <div class="mini-stat-content">
-                <div class="mini-stat-value" id="stat-ports">{{ stats.total_ports }}</div>
-                <div class="mini-stat-label">Open Ports</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-xl-4 col-md-4">
-        <div class="mini-stat-card">
-            <div class="mini-stat-icon bg-primary-subtle">
-                <i class="bi bi-clock-history"></i>
-            </div>
-            <div class="mini-stat-content">
-                <div class="mini-stat-value mono" id="stat-last-scan" style="font-size: 0.8rem;">
-                    {% if stats.recent_scans %}{{ stats.recent_scans[0].end_time or '—' }}{% else %}—{% endif %}
-                </div>
-                <div class="mini-stat-label">Last Scan</div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- 4. CHARTS ROW -->
-<div class="row g-3 mb-3">
-    <div class="col-lg-6">
-        <div class="chart-container-card">
-            <div class="chart-title">
-                <i class="bi bi-pie-chart me-2"></i>Vulnerability Severity
-            </div>
-            <canvas id="vulnSeverityChart" height="240"></canvas>
-        </div>
-    </div>
-    <div class="col-lg-6">
-        <div class="chart-container-card">
-            <div class="chart-title">
-                <i class="bi bi-bar-chart me-2"></i>Threat Summary
-            </div>
-            <canvas id="threatChart" height="240"></canvas>
-        </div>
-    </div>
-</div>
-
-<!-- 5. PIPELINE STATUS SECTION -->
-<div class="row g-3 mb-3">
-    <div class="col-12">
-        <div class="pipeline-card">
-            <div class="pipeline-title"><i class="bi bi-arrow-repeat me-1"></i>Daemon Pipeline Status</div>
-            <div class="pipeline-steps" id="pipelineSteps">
-                <div class="pipeline-step pending" data-step="discovery">
-                    <span class="step-icon">&#9675;</span> Discovery
-                </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-step pending" data-step="tcp_scan">
-                    <span class="step-icon">&#9675;</span> TCP Scan
-                </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-step pending" data-step="service_enum">
-                    <span class="step-icon">&#9675;</span> Service Enum
-                </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-step pending" data-step="tls">
-                    <span class="step-icon">&#9675;</span> TLS
-                </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-step pending" data-step="os_fingerprint">
-                    <span class="step-icon">&#9675;</span> OS
-                </div>
-                <span class="pipeline-arrow">&rarr;</span>
-                <div class="pipeline-step pending" data-step="ml_analysis">
-                    <span class="step-icon">&#9675;</span> ML
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Recent Scans Table -->
+<!-- Recent Activity -->
 {% if stats.recent_scans %}
-<div class="row g-3">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex align-items-center justify-content-between">
-                <span><i class="bi bi-clock-history me-2"></i>Recent Scans</span>
-                <span class="badge badge-pill badge-info-custom">{{ stats.recent_scans|length }}</span>
-            </div>
-            <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table-dark-custom">
-                        <thead>
-                            <tr>
-                                <th>Type</th>
-                                <th>Started</th>
-                                <th>Ended</th>
-                                <th>Hosts</th>
-                                <th>Ports</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for scan in stats.recent_scans %}
-                            <tr>
-                                <td><span class="badge badge-pill badge-info-custom">{{ scan.scan_type }}</span></td>
-                                <td class="mono">{{ scan.start_time }}</td>
-                                <td class="mono">{{ scan.end_time or '—' }}</td>
-                                <td class="mono fw-bold">{{ scan.hosts_found }}</td>
-                                <td class="mono fw-bold">{{ scan.ports_found }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    </div>
+<h3 style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:12px;">Recent Activity</h3>
+<table class="table-minimal">
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Hosts</th>
+            <th>Ports</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for scan in stats.recent_scans[:10] %}
+        <tr>
+            <td class="mono text-muted text-sm">{{ scan.end_time or scan.start_time or '—' }}</td>
+            <td class="font-medium">{{ scan.scan_type }}</td>
+            <td class="mono">{{ scan.hosts_found }}</td>
+            <td class="mono">{{ scan.ports_found }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    No scan activity yet. Start a scan from the Scans page.
 </div>
 {% endif %}
-{% endblock %}
-
-{% block scripts %}
-<script>
-    // Pipeline status polling
-    function updatePipelineStatus() {
-        fetch('/api/scan/progress')
-            .then(r => r.json())
-            .then(data => {
-                const steps = document.querySelectorAll('#pipelineSteps .pipeline-step');
-                const stepsMap = { discovery: 0, tcp_scan: 1, service_enum: 2, tls: 3, os_fingerprint: 4, ml_analysis: 5 };
-                if (data.pipeline_steps) {
-                    data.pipeline_steps.forEach(function(step) {
-                        var idx = stepsMap[step.name];
-                        if (idx !== undefined && steps[idx]) {
-                            var el = steps[idx];
-                            var icon = el.querySelector('.step-icon');
-                            el.classList.remove('done', 'running', 'pending');
-                            if (step.status === 'done') { el.classList.add('done'); icon.innerHTML = '&#10003;'; }
-                            else if (step.status === 'running') { el.classList.add('running'); icon.innerHTML = '&#9203;'; }
-                            else { el.classList.add('pending'); icon.innerHTML = '&#9675;'; }
-                        }
-                    });
-                }
-            })
-            .catch(function() {});
-    }
-    updatePipelineStatus();
-    setInterval(updatePipelineStatus, 10000);
-
-    // Vulnerability Severity Doughnut Chart
-    var vulnCtx = document.getElementById('vulnSeverityChart').getContext('2d');
-    window.hvVulnChart = new Chart(vulnCtx, {
-        type: 'doughnut',
-        data: {
-            labels: ['Critical', 'High', 'Medium', 'Low', 'Info'],
-            datasets: [{
-                data: [
-                    {{ stats.vulnerabilities.critical }},
-                    {{ stats.vulnerabilities.high }},
-                    {{ stats.vulnerabilities.medium }},
-                    {{ stats.vulnerabilities.low }},
-                    {{ stats.vulnerabilities.info }}
-                ],
-                backgroundColor: ['#dc3545', '#fd7e14', '#ffc107', '#28a745', '#0088cc'],
-                borderColor: '#ffffff',
-                borderWidth: 2,
-                hoverBorderWidth: 3
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: '65%',
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: { color: '#777b83', padding: 14, usePointStyle: true, pointStyle: 'circle', font: { size: 11 } }
-                }
-            }
-        }
-    });
-
-    // Threat Summary Bar Chart
-    var threatCtx = document.getElementById('threatChart').getContext('2d');
-    window.hvThreatChart = new Chart(threatCtx, {
-        type: 'bar',
-        data: {
-            labels: ['Hosts', 'Open Ports', 'Vulnerabilities', 'Anomalies'],
-            datasets: [{
-                label: 'Count',
-                data: [{{ stats.total_hosts }}, {{ stats.total_ports }}, {{ stats.vulnerabilities.total }}, {{ stats.active_anomalies }}],
-                backgroundColor: ['rgba(0,136,204,0.7)', 'rgba(40,167,69,0.7)', 'rgba(220,53,69,0.7)', 'rgba(255,193,7,0.7)'],
-                borderColor: ['#0088cc', '#28a745', '#dc3545', '#ffc107'],
-                borderWidth: 1,
-                borderRadius: 4,
-                maxBarThickness: 50
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true, ticks: { color: '#999da3', font: { size: 11 } }, grid: { color: '#f1f3f5', drawBorder: false } },
-                x: { ticks: { color: '#999da3', font: { size: 11 } }, grid: { display: false } }
-            },
-            plugins: { legend: { display: false } }
-        }
-    });
-</script>
 {% endblock %}

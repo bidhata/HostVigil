@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Data (runtime, not source)
+data/hostvigil.db
+data/.hostvigil.pid
+data/logs/*
+data/models/*.pkl
+data/scans/*
+data/reports/*
+!data/logs/.gitkeep
+!data/scans/.gitkeep
+!data/reports/.gitkeep
+!data/models/.gitkeep
+
+# PCAP captures
+data/pcap/
+*.pcap
+*.pcapng
+
+# Environment & secrets
+.env
+.env.local
+*.key
+*.pem
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Plugin artifacts
+plugins/__pycache__/
+plugins/*.pyc

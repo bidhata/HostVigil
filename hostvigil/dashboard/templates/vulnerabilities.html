@@ -89,6 +89,7 @@
     <p>{% if current_filter %}No {{ current_filter }} severity findings. Try a different filter.{% else %}Run a nuclei scan to detect vulnerabilities.{% endif %}</p>
 </div>
 {% endif %}
+{% endblock %}
 
 {% block scripts %}
 <script>
@@ -108,5 +109,4 @@ function filterVulns() {
     });
 }
 </script>
-{% endblock %}
 {% endblock %}

@@ -87,25 +87,47 @@ class StealthCredentialSpray:
         self._ensure_table()
 
     def _ensure_table(self):
-        """Create credential_results table if it does not exist."""
+        """Create/migrate credential_results table to expected schema."""
         conn = sqlite3.connect(self.db_path)
         try:
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS credential_results (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    host_id INTEGER,
-                    ip TEXT NOT NULL,
-                    port INTEGER NOT NULL,
-                    service TEXT NOT NULL,
-                    username TEXT NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    success INTEGER NOT NULL DEFAULT 0,
-                    attempted_at TEXT NOT NULL
+                    host_id INTEGER NOT NULL,
+                    port INTEGER,
+                    service TEXT,
+                    username TEXT,
+                    credential_hash TEXT,
+                    success INTEGER DEFAULT 0,
+                    tested_at TEXT NOT NULL,
+                    FOREIGN KEY (host_id) REFERENCES hosts(id)
                 )
             ''')
+
+            # Backward compatibility migrations for older local schemas.
+            cols = {
+                row[1] for row in conn.execute(
+                    "PRAGMA table_info(credential_results)"
+                ).fetchall()
+            }
+            if 'credential_hash' not in cols:
+                conn.execute("ALTER TABLE credential_results ADD COLUMN credential_hash TEXT")
+            if 'tested_at' not in cols:
+                conn.execute("ALTER TABLE credential_results ADD COLUMN tested_at TEXT")
+            if 'password_hash' in cols:
+                conn.execute(
+                    "UPDATE credential_results SET credential_hash = password_hash "
+                    "WHERE credential_hash IS NULL AND password_hash IS NOT NULL"
+                )
+            if 'attempted_at' in cols:
+                conn.execute(
+                    "UPDATE credential_results SET tested_at = attempted_at "
+                    "WHERE tested_at IS NULL AND attempted_at IS NOT NULL"
+                )
+
             conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_cred_ip_port_time
-                ON credential_results (ip, port, attempted_at)
+                CREATE INDEX IF NOT EXISTS idx_cred_host_port_time
+                ON credential_results (host_id, port, tested_at)
             ''')
             conn.commit()
         finally:
@@ -147,12 +169,13 @@ class StealthCredentialSpray:
 
         results = []
         for target in targets:
+            host_id = target['host_id']
             ip = target['ip']
             port = target['port']
             service = SERVICE_PORTS.get(port, 'unknown')
 
             # Pick next untried credential for this target
-            cred = self._get_next_credential(ip, port, creds)
+            cred = self._get_next_credential(host_id, port, creds)
             if cred is None:
                 logger.debug(f"All credentials exhausted for {ip}:{port}")
                 continue
@@ -162,7 +185,7 @@ class StealthCredentialSpray:
 
             try:
                 success = self._attempt_auth(ip, port, service, username, password)
-                self._store_result(ip, port, service, username, password, success)
+                self._store_result(host_id, port, service, username, password, success)
 
                 result = {
                     'ip': ip,
@@ -227,8 +250,8 @@ class StealthCredentialSpray:
             for target in all_targets:
                 count = conn.execute('''
                     SELECT COUNT(*) FROM credential_results
-                    WHERE ip = ? AND port = ? AND attempted_at > ?
-                ''', (target['ip'], target['port'], one_hour_ago)).fetchone()[0]
+                    WHERE host_id = ? AND port = ? AND tested_at > ?
+                ''', (target['host_id'], target['port'], one_hour_ago)).fetchone()[0]
 
                 if count < self.max_attempts_per_host_per_hour:
                     eligible.append(target)
@@ -241,7 +264,7 @@ class StealthCredentialSpray:
             conn.close()
 
     def _get_next_credential(
-        self, ip: str, port: int, creds: List[Tuple]
+        self, host_id: int, port: int, creds: List[Tuple]
     ) -> Optional[Tuple]:
         """
         Get the next untried credential for a target.
@@ -252,9 +275,9 @@ class StealthCredentialSpray:
         conn = sqlite3.connect(self.db_path)
         try:
             cursor = conn.execute('''
-                SELECT username, password_hash FROM credential_results
-                WHERE ip = ? AND port = ?
-            ''', (ip, port))
+                SELECT username, credential_hash FROM credential_results
+                WHERE host_id = ? AND port = ?
+            ''', (host_id, port))
 
             attempted = set()
             for row in cursor.fetchall():
@@ -1037,7 +1060,7 @@ class StealthCredentialSpray:
     # ─── Storage & Retrieval ──────────────────────────────────────────────
 
     def _store_result(
-        self, ip: str, port: int, service: str,
+        self, host_id: int, port: int, service: str,
         username: str, password: str, success: bool
     ):
         """
@@ -1045,23 +1068,16 @@ class StealthCredentialSpray:
 
         Passwords are SHA-256 hashed before storage — plaintext is NEVER persisted.
         """
-        password_hash = self._hash_password(password)
+        credential_hash = self._hash_password(password)
         timestamp = datetime.now(timezone.utc).isoformat()
 
         conn = sqlite3.connect(self.db_path)
         try:
-            # Try to get host_id from hosts table
-            cursor = conn.execute(
-                'SELECT id FROM hosts WHERE ip = ?', (ip,)
-            )
-            row = cursor.fetchone()
-            host_id = row[0] if row else None
-
             conn.execute('''
                 INSERT INTO credential_results
-                (host_id, ip, port, service, username, password_hash, success, attempted_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (host_id, ip, port, service, username, password_hash,
+                (host_id, port, service, username, credential_hash, success, tested_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (host_id, port, service, username, credential_hash,
                   1 if success else 0, timestamp))
             conn.commit()
         finally:
@@ -1079,10 +1095,11 @@ class StealthCredentialSpray:
         conn.row_factory = sqlite3.Row
         try:
             cursor = conn.execute('''
-                SELECT ip, port, service, username, password_hash, attempted_at
-                FROM credential_results
+                SELECT h.ip, c.port, c.service, c.username, c.credential_hash, c.tested_at
+                FROM credential_results c
+                JOIN hosts h ON h.id = c.host_id
                 WHERE success = 1
-                ORDER BY attempted_at DESC
+                ORDER BY c.tested_at DESC
             ''')
             results = []
             for row in cursor.fetchall():
@@ -1091,8 +1108,8 @@ class StealthCredentialSpray:
                     'port': row['port'],
                     'service': row['service'],
                     'username': row['username'],
-                    'password_hash': row['password_hash'],
-                    'attempted_at': row['attempted_at'],
+                    'credential_hash': row['credential_hash'],
+                    'tested_at': row['tested_at'],
                 })
             return results
         finally:
@@ -1109,10 +1126,10 @@ class StealthCredentialSpray:
                 'SELECT COUNT(*) FROM credential_results WHERE success = 1'
             ).fetchone()[0]
             unique_hosts = conn.execute(
-                'SELECT COUNT(DISTINCT ip) FROM credential_results'
+                'SELECT COUNT(DISTINCT host_id) FROM credential_results'
             ).fetchone()[0]
             last_attempt = conn.execute(
-                'SELECT MAX(attempted_at) FROM credential_results'
+                'SELECT MAX(tested_at) FROM credential_results'
             ).fetchone()[0]
 
             return {

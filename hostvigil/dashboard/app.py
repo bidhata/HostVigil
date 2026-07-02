@@ -5,18 +5,24 @@ Provides both HTML views and JSON API endpoints for network monitoring data.
 Binds to 127.0.0.1 only by default (stealth - no network exposure).
 """
 
-from flask import Flask, render_template, jsonify, request, session, redirect, url_for, flash
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for
 import sqlite3
 import json
 import time
 import threading
 import functools
+import shlex
+import sys
 from pathlib import Path
 from contextlib import contextmanager
+from collections import deque
 
 # Module-level stats cache for _get_stats()
 _stats_cache = {'data': None, 'time': 0}
 _stats_lock = threading.Lock()
+
+# Module-level scan log buffer for SSE streaming
+_scan_log_buffer = deque(maxlen=200)
 
 
 def create_app(config: dict = None):
@@ -56,6 +62,16 @@ def create_app(config: dict = None):
             app.config["PORT"] = config["port"]
         if "orchestrator" in config:
             app.orchestrator = config["orchestrator"]
+
+    # Security: Generate random secret key if still using default
+    if app.config["SECRET_KEY"] == "change-this-in-production":
+        import secrets
+        app.config["SECRET_KEY"] = secrets.token_hex(32)
+        print('[!] WARNING: Using random secret key. Sessions will not persist across restarts.', file=sys.stderr)
+
+    # Session timeout
+    from datetime import timedelta
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=4)
 
     # -------------------------------------------------------------------
     # Database helpers
@@ -108,6 +124,7 @@ def create_app(config: dict = None):
                 created_at TEXT NOT NULL
             );
         """)
+
         # Create default admin user if not exists
         from werkzeug.security import generate_password_hash
         from datetime import datetime, timezone
@@ -227,6 +244,7 @@ def create_app(config: dict = None):
             if user and check_password_hash(user["password_hash"], password):
                 session["logged_in"] = True
                 session["username"] = username
+                session.permanent = True
                 return redirect(url_for("index"))
             return render_template("login.html", error="Invalid username or password")
         return render_template("login.html", error=None)
@@ -660,6 +678,7 @@ def create_app(config: dict = None):
         def _run_scan():
             status_entry = {"type": scan_type, "status": "running", "started": _now_iso()}
             _active_scans[scan_type] = status_entry
+            _append_scan_log('info', f'Started {scan_type} scan')
             app._scan_running = True
             app._scan_status = status_entry
             try:
@@ -700,6 +719,7 @@ def create_app(config: dict = None):
                 }
                 _active_scans[scan_type] = completed_status
                 app._scan_status = completed_status
+                _append_scan_log('info', f'Completed {scan_type}')
             except Exception as e:
                 error_status = {
                     "type": scan_type,
@@ -709,6 +729,7 @@ def create_app(config: dict = None):
                 }
                 _active_scans[scan_type] = error_status
                 app._scan_status = error_status
+                _append_scan_log('error', f'Error in {scan_type}: {e}')
             finally:
                 app._scan_running = len([s for s in _active_scans.values()
                                          if s.get('status') == 'running']) > 0
@@ -730,15 +751,32 @@ def create_app(config: dict = None):
     @app.route("/api/scan/status")
     def api_scan_status():
         """Get current background scan status (all active scans)."""
-        running_scans = {k: v for k, v in _active_scans.items()
+        scans_snapshot = dict(_active_scans)
+        running_scans = {k: v for k, v in scans_snapshot.items()
                         if v.get('status') == 'running'}
         return jsonify({
             "running": len(running_scans) > 0,
-            "active_scans": _active_scans,
+            "active_scans": scans_snapshot,
             "running_types": list(running_scans.keys()),
             # Legacy field for backward compatibility with existing JS
             "scan": getattr(app, '_scan_status', None)
         })
+
+    @app.route('/api/scan/logs')
+    def api_scan_logs():
+        """SSE endpoint for streaming scan log lines."""
+        import time as _time
+        def generate():
+            last_idx = 0
+            while True:
+                logs = list(_scan_log_buffer)
+                if len(logs) > last_idx:
+                    for log in logs[last_idx:]:
+                        yield f"data: {json.dumps(log)}\n\n"
+                    last_idx = len(logs)
+                _time.sleep(1)
+        from flask import Response
+        return Response(generate(), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
     # -------------------------------------------------------------------
     # Host-level Scan Trigger API
@@ -802,15 +840,15 @@ def create_app(config: dict = None):
                 if scan_type == 'scan':
                     # TCP port scan against single host
                     from hostvigil.scanner.stealth_scanner import StealthScanner
-                    scanner = StealthScanner(orch.config, orch.db_path)
+                    scanner = StealthScanner(orch.config.hostvigil, orch.db_path)
                     result = scanner.scan_hosts([ip])
                 elif scan_type == 'fingerprint':
                     from hostvigil.scanner.os_fingerprint import OSFingerprinter
-                    fp = OSFingerprinter(orch.config, orch.db_path)
-                    result = fp.fingerprint_hosts([ip])
+                    fp = OSFingerprinter({**orch.config.stealth}, orch.db_path)
+                    result = fp.fingerprint_host(ip)
                 elif scan_type == 'tls':
                     from hostvigil.scanner.tls_inspector import TLSInspector
-                    inspector = TLSInspector(orch.config, orch.db_path)
+                    inspector = TLSInspector({**orch.config.stealth}, orch.db_path)
                     # Get TLS-capable ports for this host
                     tls_ports = query_db(
                         "SELECT port FROM ports WHERE host_id = ? AND state='open' AND port IN (443,636,993,995,465,8443,5986,2376,9443) AND is_active=1",
@@ -823,11 +861,11 @@ def create_app(config: dict = None):
                         result = {"message": "No TLS ports found for this host"}
                 elif scan_type == 'enumerate':
                     from hostvigil.scanner.service_enum import ServiceEnumerator
-                    enumerator = ServiceEnumerator(orch.config, orch.db_path)
+                    enumerator = ServiceEnumerator({**orch.config.stealth}, orch.db_path)
                     result = enumerator.enumerate_host(ip)
                 elif scan_type == 'nuclei':
                     from hostvigil.nuclei.nuclei_runner import NucleiRunner
-                    runner = NucleiRunner(orch.config, orch.db_path)
+                    runner = NucleiRunner(orch.config.nuclei, orch.db_path)
                     # Build target URLs from open ports
                     open_ports = query_db(
                         "SELECT port, service FROM ports WHERE host_id = ? AND state='open' AND is_active=1",
@@ -895,9 +933,10 @@ def create_app(config: dict = None):
         # --- Dashboard scans progress ---
         dashboard_scans = {}
         scan_types_tracked = ['discover', 'scan', 'udpscan', 'fingerprint', 'tls', 'enumerate', 'analyze', 'nuclei']
+        scans_snapshot = dict(_active_scans)
         for stype in scan_types_tracked:
-            if stype in _active_scans:
-                entry = _active_scans[stype]
+            if stype in scans_snapshot:
+                entry = scans_snapshot[stype]
                 dashboard_scans[stype] = {
                     "status": entry.get("status", "idle"),
                     "started": entry.get("started"),
@@ -1149,7 +1188,6 @@ def create_app(config: dict = None):
     def api_discover_dns():
         """Discover hosts using a custom DNS server for zone transfer or reverse lookups."""
         import threading
-        from hostvigil.discovery import StealthDiscovery
 
         if not request.is_json:
             return jsonify({"error": "JSON body required"}), 400
@@ -1277,6 +1315,10 @@ def create_app(config: dict = None):
         from datetime import datetime, timezone
         return datetime.now(timezone.utc).isoformat()
 
+    def _append_scan_log(level, message):
+        """Append a log entry to the scan log buffer for SSE streaming."""
+        _scan_log_buffer.append({'level': level, 'message': message, 'time': _now_iso()})
+
     def _store_dns_host(db_path: str, ip: str, hostname: str):
         """Store a DNS-discovered host in the database."""
         from datetime import datetime, timezone
@@ -1299,8 +1341,9 @@ def create_app(config: dict = None):
                 )
             conn.commit()
             conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger('hostvigil.dashboard').warning(f'Failed to store DNS host {ip}: {e}')
 
     def _parse_dns_ptr_response(response: bytes, query_name: str) -> str:
         """Parse a DNS PTR response to extract the hostname."""
@@ -1601,12 +1644,16 @@ def create_app(config: dict = None):
     # -------------------------------------------------------------------
 
     @app.route('/host/<ip>')
+    @app.route('/hosts/<ip>')
     @login_required
     def host_detail(ip):
         """Host detail page - all info for a single IP."""
         host = query_db("SELECT * FROM hosts WHERE ip = ?", (ip,), one=True)
         if not host:
-            return render_template("host_detail.html", host={"ip": ip}, ports=[], vulns=[], tls=[], anomalies=[])
+            return render_template("host_detail.html", host={
+                "ip": ip, "hostname": None, "mac": None, "os_fingerprint": None,
+                "is_active": False, "discovery_method": None, "first_seen": None, "last_seen": None
+            }, ports=[], vulns=[], tls=[], anomalies=[])
 
         host_id = host["id"]
         ports = query_db(
@@ -2116,14 +2163,17 @@ def create_app(config: dict = None):
     @app.route('/api/credentials')
     def api_credentials():
         """Get credential correlation matrix."""
-        creds = query_db('''
-            SELECT c.id, h.ip, h.hostname, c.port, c.service, c.username,
-                   c.credential_hash, c.success, c.tested_at
-            FROM credential_results c
-            JOIN hosts h ON h.id = c.host_id
-            WHERE c.success = 1
-            ORDER BY c.username, h.ip
-        ''')
+        try:
+            creds = query_db('''
+                SELECT c.id, h.ip, h.hostname, c.port, c.service, c.username,
+                       c.credential_hash, c.success, c.tested_at
+                FROM credential_results c
+                JOIN hosts h ON h.id = c.host_id
+                WHERE c.success = 1
+                ORDER BY c.username, h.ip
+            ''')
+        except sqlite3.OperationalError:
+            creds = []
         return jsonify(creds)
 
     # --- Honey Token Detection ---
@@ -2242,16 +2292,52 @@ def create_app(config: dict = None):
         current_hosts = set(r['ip'] for r in query_db('SELECT ip FROM hosts'))
         prev_hosts = set(previous.get('hosts', []))
         
-        current_vulns = query_db('SELECT name, severity FROM vulnerabilities')
+        current_vulns = query_db('''
+            SELECT name, severity, template_id, host_id, port
+            FROM vulnerabilities
+        ''')
         prev_vulns = previous.get('vulnerabilities', [])
-        prev_vuln_names = set(v.get('name', '') for v in prev_vulns)
+        current_vuln_keys = {
+            (
+                v.get('template_id') or '',
+                v.get('name') or '',
+                str(v.get('host_id') or ''),
+                str(v.get('port') or ''),
+            )
+            for v in current_vulns
+        }
+        prev_vuln_keys = {
+            (
+                v.get('template_id') or '',
+                v.get('name') or '',
+                str(v.get('host_id') or ''),
+                str(v.get('port') or ''),
+            )
+            for v in prev_vulns
+        }
         
         comparison = {
             'new_hosts': list(current_hosts - prev_hosts),
             'removed_hosts': list(prev_hosts - current_hosts),
             'common_hosts': len(current_hosts & prev_hosts),
-            'new_vulns': [v for v in current_vulns if v['name'] not in prev_vuln_names],
-            'resolved_vulns': [v for v in prev_vulns if v.get('name') not in set(cv['name'] for cv in current_vulns)],
+            'new_vulns': [
+                v for v in current_vulns
+                if (
+                    (v.get('template_id') or ''),
+                    (v.get('name') or ''),
+                    str(v.get('host_id') or ''),
+                    str(v.get('port') or ''),
+                ) not in prev_vuln_keys
+            ],
+            'resolved_vulns': [
+                v for v in prev_vulns
+                if (
+                    (v.get('template_id') or ''),
+                    (v.get('name') or ''),
+                    str(v.get('host_id') or ''),
+                    str(v.get('port') or ''),
+                ) not in current_vuln_keys
+            ],
             'current_total': len(current_hosts),
             'previous_total': len(prev_hosts),
         }
@@ -2283,35 +2369,87 @@ def create_app(config: dict = None):
         data = request.get_json()
         cmd = data.get('command', '').strip()
 
-        # Strict allowlist of safe commands with their permitted arguments
-        allowed_commands = {
-            'status': ['--json'],
-            'diff': ['--hours'],
-            'export': ['--format', 'json', 'csv', 'report', 'ips', 'targets', 'urls', 'c2'],
+        # Strict allowlist of safe commands and exact argument schema.
+        # This blocks malformed flag/value pairs while still allowing common uses.
+        def _is_safe_output_path(value: str) -> bool:
+            p = Path(value)
+            if p.is_absolute():
+                return False
+            if '..' in p.parts:
+                return False
+            return True
+
+        command_specs = {
+            'status': {
+                'flags_no_value': {'--json'},
+                'flags_with_value': {},
+                'allow_positional': False,
+            },
+            'diff': {
+                'flags_no_value': set(),
+                'flags_with_value': {'--hours': 'int'},
+                'allow_positional': False,
+            },
+            'export': {
+                'flags_no_value': set(),
+                'flags_with_value': {
+                    '--format': {'json', 'csv', 'report', 'ips', 'targets', 'urls', 'c2'},
+                    '--output': 'path',
+                    '-o': 'path',
+                },
+                'allow_positional': False,
+            },
         }
 
-        parts = cmd.split()
+        try:
+            parts = shlex.split(cmd)
+        except ValueError as e:
+            return jsonify({'error': f'Invalid command syntax: {e}'}), 400
+
         if not parts:
             return jsonify({'error': 'No command provided'}), 400
 
         cmd_base = parts[0]
-        if cmd_base not in allowed_commands:
-            return jsonify({'error': f'Command not allowed. Permitted: {list(allowed_commands.keys())}'}), 403
+        if cmd_base not in command_specs:
+            return jsonify({'error': f'Command not allowed. Permitted: {list(command_specs.keys())}'}), 403
 
-        # Validate all arguments against the allowlist for this command
-        allowed_args = allowed_commands[cmd_base]
-        for arg in parts[1:]:
-            # Allow numeric values (e.g., --hours 24)
-            if arg.isdigit():
+        spec = command_specs[cmd_base]
+        i = 1
+        while i < len(parts):
+            token = parts[i]
+            if token in spec['flags_no_value']:
+                i += 1
                 continue
-            if arg not in allowed_args:
-                return jsonify({'error': f'Argument not allowed: {arg}'}), 403
+
+            if token in spec['flags_with_value']:
+                i += 1
+                if i >= len(parts):
+                    return jsonify({'error': f'Missing value for {token}'}), 400
+                value = parts[i]
+                rule = spec['flags_with_value'][token]
+                if rule == 'int':
+                    if not value.isdigit():
+                        return jsonify({'error': f'Invalid value for {token}: {value}'}), 400
+                elif rule == 'path':
+                    if not _is_safe_output_path(value):
+                        return jsonify({'error': f'Unsafe output path: {value}'}), 400
+                elif isinstance(rule, set):
+                    if value not in rule:
+                        return jsonify({'error': f'Invalid value for {token}: {value}'}), 400
+                i += 1
+                continue
+
+            if token.startswith('-'):
+                return jsonify({'error': f'Argument not allowed: {token}'}), 403
+            if not spec['allow_positional']:
+                return jsonify({'error': f'Positional argument not allowed: {token}'}), 403
+            i += 1
 
         import subprocess
         try:
-            # Use list form to prevent shell injection — no shell=True
+            # Use list form and current interpreter to prevent shell injection and venv drift.
             result = subprocess.run(
-                ['python', 'run.py'] + parts,
+                [sys.executable, 'run.py'] + parts,
                 capture_output=True, text=True, timeout=30,
                 cwd=str(Path(app.config['DB_PATH']).parent.parent)
             )
@@ -2406,17 +2544,6 @@ def create_app(config: dict = None):
                 name TEXT NOT NULL,
                 config TEXT NOT NULL,
                 created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS credential_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                host_id INTEGER NOT NULL,
-                port INTEGER,
-                service TEXT,
-                username TEXT,
-                credential_hash TEXT,
-                success INTEGER DEFAULT 0,
-                tested_at TEXT NOT NULL,
-                FOREIGN KEY (host_id) REFERENCES hosts(id)
             );
             CREATE TABLE IF NOT EXISTS honeytokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -51,34 +51,92 @@ class TLSInspector:
         self._ensure_table()
 
     def _ensure_table(self):
-        """Create tls_certificates table if it doesn't exist."""
+        """Create/migrate tls_certificates table for schema compatibility."""
         conn = sqlite3.connect(self.db_path)
-        conn.execute('''CREATE TABLE IF NOT EXISTS tls_certificates (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            host_id INTEGER,
-            ip TEXT NOT NULL,
-            port INTEGER NOT NULL,
-            subject TEXT,
-            issuer TEXT,
-            serial_number TEXT,
-            not_before TEXT,
-            not_after TEXT,
-            is_expired INTEGER DEFAULT 0,
-            is_self_signed INTEGER DEFAULT 0,
-            signature_algorithm TEXT,
-            key_type TEXT,
-            key_size INTEGER,
-            san_names TEXT,
-            protocol_version TEXT,
-            cipher_suite TEXT,
-            cipher_bits INTEGER,
-            weaknesses TEXT,
-            cert_fingerprint_sha256 TEXT,
-            inspected_at TEXT,
-            FOREIGN KEY (host_id) REFERENCES hosts(id)
-        )''')
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute('''CREATE TABLE IF NOT EXISTS tls_certificates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                host_id INTEGER,
+                ip TEXT,
+                port INTEGER NOT NULL,
+                subject TEXT,
+                issuer TEXT,
+                serial_number TEXT,
+                not_before TEXT,
+                not_after TEXT,
+                is_expired INTEGER DEFAULT 0,
+                is_self_signed INTEGER DEFAULT 0,
+                signature_algorithm TEXT,
+                key_type TEXT,
+                key_size INTEGER,
+                key_bits INTEGER,
+                san_names TEXT,
+                san_domains TEXT,
+                protocol_version TEXT,
+                cipher_suite TEXT,
+                cipher_bits INTEGER,
+                weaknesses TEXT,
+                fingerprint_sha256 TEXT,
+                cert_fingerprint_sha256 TEXT,
+                inspected_at TEXT,
+                FOREIGN KEY (host_id) REFERENCES hosts(id)
+            )''')
+
+            cols = {
+                row[1] for row in conn.execute(
+                    'PRAGMA table_info(tls_certificates)'
+                ).fetchall()
+            }
+            for col_def in (
+                'ip TEXT',
+                'signature_algorithm TEXT',
+                'key_size INTEGER',
+                'key_bits INTEGER',
+                'san_names TEXT',
+                'san_domains TEXT',
+                'cipher_bits INTEGER',
+                'weaknesses TEXT',
+                'fingerprint_sha256 TEXT',
+                'cert_fingerprint_sha256 TEXT',
+            ):
+                col_name = col_def.split()[0]
+                if col_name not in cols:
+                    conn.execute(f'ALTER TABLE tls_certificates ADD COLUMN {col_def}')
+
+            # Backfill compatibility fields if one naming set exists but the other does not.
+            if 'fingerprint_sha256' in cols and 'cert_fingerprint_sha256' in cols:
+                conn.execute(
+                    "UPDATE tls_certificates SET cert_fingerprint_sha256 = fingerprint_sha256 "
+                    "WHERE (cert_fingerprint_sha256 IS NULL OR cert_fingerprint_sha256 = '') "
+                    "AND fingerprint_sha256 IS NOT NULL AND fingerprint_sha256 != ''"
+                )
+                conn.execute(
+                    "UPDATE tls_certificates SET fingerprint_sha256 = cert_fingerprint_sha256 "
+                    "WHERE (fingerprint_sha256 IS NULL OR fingerprint_sha256 = '') "
+                    "AND cert_fingerprint_sha256 IS NOT NULL AND cert_fingerprint_sha256 != ''"
+                )
+            if 'key_bits' in cols and 'key_size' in cols:
+                conn.execute(
+                    "UPDATE tls_certificates SET key_size = key_bits "
+                    "WHERE (key_size IS NULL OR key_size = 0) AND key_bits IS NOT NULL AND key_bits > 0"
+                )
+                conn.execute(
+                    "UPDATE tls_certificates SET key_bits = key_size "
+                    "WHERE (key_bits IS NULL OR key_bits = 0) AND key_size IS NOT NULL AND key_size > 0"
+                )
+            if 'san_domains' in cols and 'san_names' in cols:
+                conn.execute(
+                    "UPDATE tls_certificates SET san_names = san_domains "
+                    "WHERE (san_names IS NULL OR san_names = '') AND san_domains IS NOT NULL AND san_domains != ''"
+                )
+                conn.execute(
+                    "UPDATE tls_certificates SET san_domains = san_names "
+                    "WHERE (san_domains IS NULL OR san_domains = '') AND san_names IS NOT NULL AND san_names != ''"
+                )
+
+            conn.commit()
+        finally:
+            conn.close()
 
     def inspect_all(self) -> List[Dict]:
         """Inspect all hosts with TLS ports open in the database."""
@@ -89,36 +147,19 @@ class TLSInspector:
         # Query hosts that have TLS-capable ports open
         port_placeholders = ','.join('?' for _ in TLS_PORTS)
         query = f'''
-            SELECT DISTINCT h.id as host_id, h.ip, s.port
+            SELECT DISTINCT h.id as host_id, h.ip, p.port
             FROM hosts h
-            JOIN scan_results s ON h.id = s.host_id
-            WHERE s.port IN ({port_placeholders})
-            AND s.state = 'open'
+            JOIN ports p ON h.id = p.host_id
+            WHERE p.port IN ({port_placeholders})
+            AND p.state = 'open' AND p.is_active = 1
+            AND h.is_active = 1
         '''
 
         try:
             rows = conn.execute(query, TLS_PORTS).fetchall()
-        except sqlite3.OperationalError:
-            # Fallback: if scan_results table doesn't exist, try simpler query
-            logger.warning("scan_results table not found, trying direct host query")
-            try:
-                rows = conn.execute(
-                    'SELECT id as host_id, ip FROM hosts'
-                ).fetchall()
-                # Convert to list of dicts with default TLS ports
-                expanded_rows = []
-                for row in rows:
-                    for port in TLS_PORTS:
-                        expanded_rows.append({
-                            'host_id': row['host_id'],
-                            'ip': row['ip'],
-                            'port': port
-                        })
-                rows = expanded_rows
-            except sqlite3.OperationalError:
-                logger.error("No hosts table found in database")
-                conn.close()
-                return results
+        except sqlite3.OperationalError as e:
+            logger.warning("Failed to query ports table: %s", e)
+            rows = []
         finally:
             conn.close()
 
@@ -134,9 +175,12 @@ class TLSInspector:
                 port = row['port']
 
             logger.debug(f"Inspecting {ip}:{port} ({idx + 1}/{total})")
-            result = self.inspect_host(ip, port)
-            if result:
-                results.append(result)
+            try:
+                result = self.inspect_host(ip, port)
+                if result:
+                    results.append(result)
+            except Exception as e:
+                logger.error(f"TLS inspection failed for {ip}:{port}: {e}")
 
             # Apply stealth delay between inspections (skip after last)
             if idx < total - 1:
@@ -562,40 +606,19 @@ class TLSInspector:
     def _store_result(self, ip: str, port: int, cert_info: Dict):
         """Store TLS inspection result in database. Deduplicates by fingerprint."""
         fingerprint = cert_info.get('cert_fingerprint_sha256', '')
+        san_names = cert_info.get('san_names', [])
+        san_domains = cert_info.get('san_domains', '')
+        if not san_domains:
+            san_domains = ','.join(
+                s.split(':', 1)[1] for s in san_names
+                if isinstance(s, str) and s.startswith('DNS:')
+            )
+        key_size = cert_info.get('key_size', 0)
+        key_bits = cert_info.get('key_bits', key_size)
         now = datetime.now(timezone.utc).isoformat()
 
         conn = sqlite3.connect(self.db_path)
-
-        # Check for existing entry with same fingerprint
-        existing = conn.execute(
-            '''SELECT id FROM tls_certificates
-               WHERE ip = ? AND port = ? AND cert_fingerprint_sha256 = ?''',
-            (ip, port, fingerprint)
-        ).fetchone()
-
-        if existing:
-            # Update existing record
-            conn.execute(
-                '''UPDATE tls_certificates SET
-                    protocol_version = ?,
-                    cipher_suite = ?,
-                    cipher_bits = ?,
-                    weaknesses = ?,
-                    is_expired = ?,
-                    inspected_at = ?
-                   WHERE id = ?''',
-                (
-                    cert_info.get('protocol_version', ''),
-                    cert_info.get('cipher_suite', ''),
-                    cert_info.get('cipher_bits', 0),
-                    json.dumps(cert_info.get('weaknesses', [])),
-                    1 if cert_info.get('is_expired') else 0,
-                    now,
-                    existing[0],
-                )
-            )
-        else:
-            # Insert new record
+        try:
             # Resolve host_id if possible
             host_id = None
             try:
@@ -607,40 +630,98 @@ class TLSInspector:
             except sqlite3.OperationalError:
                 pass
 
-            conn.execute(
-                '''INSERT INTO tls_certificates (
-                    host_id, ip, port, subject, issuer, serial_number,
-                    not_before, not_after, is_expired, is_self_signed,
-                    signature_algorithm, key_type, key_size, san_names,
-                    protocol_version, cipher_suite, cipher_bits,
-                    weaknesses, cert_fingerprint_sha256, inspected_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (
-                    host_id,
-                    ip,
-                    port,
-                    cert_info.get('subject', ''),
-                    cert_info.get('issuer', ''),
-                    cert_info.get('serial_number', ''),
-                    cert_info.get('not_before', ''),
-                    cert_info.get('not_after', ''),
-                    1 if cert_info.get('is_expired') else 0,
-                    1 if cert_info.get('is_self_signed') else 0,
-                    cert_info.get('signature_algorithm', ''),
-                    cert_info.get('key_type', ''),
-                    cert_info.get('key_size', 0),
-                    json.dumps(cert_info.get('san_names', [])),
-                    cert_info.get('protocol_version', ''),
-                    cert_info.get('cipher_suite', ''),
-                    cert_info.get('cipher_bits', 0),
-                    json.dumps(cert_info.get('weaknesses', [])),
-                    fingerprint,
-                    now,
-                )
-            )
+            if host_id is None:
+                logger.warning(f"Skipping TLS result storage for {ip}:{port} (host not in DB)")
+                return
 
-        conn.commit()
-        conn.close()
+            # Check for existing entry with same fingerprint.
+            existing = conn.execute(
+                '''SELECT id FROM tls_certificates
+                   WHERE ip = ? AND port = ?
+                   AND (cert_fingerprint_sha256 = ? OR fingerprint_sha256 = ?)''',
+                (ip, port, fingerprint, fingerprint)
+            ).fetchone()
+
+            if existing:
+                # Update existing record
+                conn.execute(
+                    '''UPDATE tls_certificates SET
+                        protocol_version = ?,
+                        cipher_suite = ?,
+                        cipher_bits = ?,
+                        weaknesses = ?,
+                        is_expired = ?,
+                        is_self_signed = ?,
+                        key_type = ?,
+                        key_size = ?,
+                        key_bits = ?,
+                        san_names = ?,
+                        san_domains = ?,
+                        signature_algorithm = ?,
+                        fingerprint_sha256 = ?,
+                        cert_fingerprint_sha256 = ?,
+                        inspected_at = ?
+                       WHERE id = ?''',
+                    (
+                        cert_info.get('protocol_version', ''),
+                        cert_info.get('cipher_suite', ''),
+                        cert_info.get('cipher_bits', 0),
+                        json.dumps(cert_info.get('weaknesses', [])),
+                        1 if cert_info.get('is_expired') else 0,
+                        1 if cert_info.get('is_self_signed') else 0,
+                        cert_info.get('key_type', ''),
+                        key_size,
+                        key_bits,
+                        json.dumps(san_names),
+                        san_domains,
+                        cert_info.get('signature_algorithm', ''),
+                        fingerprint,
+                        fingerprint,
+                        now,
+                        existing[0],
+                    )
+                )
+            else:
+                # Insert new record
+                conn.execute(
+                    '''INSERT INTO tls_certificates (
+                        host_id, ip, port, subject, issuer, serial_number,
+                        not_before, not_after, is_expired, is_self_signed,
+                        signature_algorithm, key_type, key_size, key_bits,
+                        san_names, san_domains,
+                        protocol_version, cipher_suite, cipher_bits,
+                        weaknesses, fingerprint_sha256, cert_fingerprint_sha256, inspected_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (
+                        host_id,
+                        ip,
+                        port,
+                        cert_info.get('subject', ''),
+                        cert_info.get('issuer', ''),
+                        cert_info.get('serial_number', ''),
+                        cert_info.get('not_before', ''),
+                        cert_info.get('not_after', ''),
+                        1 if cert_info.get('is_expired') else 0,
+                        1 if cert_info.get('is_self_signed') else 0,
+                        cert_info.get('signature_algorithm', ''),
+                        cert_info.get('key_type', ''),
+                        key_size,
+                        key_bits,
+                        json.dumps(san_names),
+                        san_domains,
+                        cert_info.get('protocol_version', ''),
+                        cert_info.get('cipher_suite', ''),
+                        cert_info.get('cipher_bits', 0),
+                        json.dumps(cert_info.get('weaknesses', [])),
+                        fingerprint,
+                        fingerprint,
+                        now,
+                    )
+                )
+
+            conn.commit()
+        finally:
+            conn.close()
 
     def get_expired_certs(self) -> List[Dict]:
         """Get all hosts with expired certificates."""

@@ -67,22 +67,52 @@ class ServiceEnumerator:
         self._ensure_table()
 
     def _ensure_table(self):
-        """Create service_enumeration table if not exists."""
+        """Create/migrate service_enumeration table for compatibility."""
         conn = sqlite3.connect(self.db_path)
-        conn.execute('''CREATE TABLE IF NOT EXISTS service_enumeration (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            host_id INTEGER,
-            ip TEXT NOT NULL,
-            port INTEGER NOT NULL,
-            service_type TEXT NOT NULL,
-            enum_data TEXT,
-            findings TEXT,
-            risk_level TEXT DEFAULT 'info',
-            enumerated_at TEXT,
-            FOREIGN KEY (host_id) REFERENCES hosts(id)
-        )''')
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute('''CREATE TABLE IF NOT EXISTS service_enumeration (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                host_id INTEGER,
+                ip TEXT,
+                port INTEGER,
+                service_type TEXT,
+                finding_type TEXT,
+                severity TEXT DEFAULT 'info',
+                risk_level TEXT,
+                title TEXT,
+                details TEXT,
+                findings TEXT,
+                enum_data TEXT,
+                discovered_at TEXT,
+                enumerated_at TEXT,
+                FOREIGN KEY (host_id) REFERENCES hosts(id)
+            )''')
+
+            cols = {
+                row[1] for row in conn.execute(
+                    'PRAGMA table_info(service_enumeration)'
+                ).fetchall()
+            }
+            # Add compatibility columns when table was created by another module.
+            for col_def in (
+                'ip TEXT',
+                'finding_type TEXT',
+                "severity TEXT DEFAULT 'info'",
+                'risk_level TEXT',
+                'title TEXT',
+                'details TEXT',
+                'findings TEXT',
+                'enum_data TEXT',
+                'discovered_at TEXT',
+                'enumerated_at TEXT',
+            ):
+                col_name = col_def.split()[0]
+                if col_name not in cols:
+                    conn.execute(f'ALTER TABLE service_enumeration ADD COLUMN {col_def}')
+
+            conn.commit()
+        finally:
+            conn.close()
 
     def enumerate_all(self) -> List[Dict]:
         """Enumerate all hosts with enumerable services from the database."""
@@ -92,12 +122,17 @@ class ServiceEnumerator:
 
         # Find hosts with ports we can enumerate
         enumerable_ports = {445, 389, 636, 5985, 5986, 6379, 9200, 2375}
-        cursor = conn.execute(
-            'SELECT DISTINCT ip, port FROM scan_results WHERE port IN ({}) AND state = ?'.format(
-                ','.join('?' * len(enumerable_ports))
-            ),
-            list(enumerable_ports) + ['open']
-        )
+        try:
+            cursor = conn.execute(
+                'SELECT DISTINCT h.ip, p.port FROM ports p JOIN hosts h ON h.id = p.host_id WHERE p.port IN ({}) AND p.state = ? AND p.is_active = 1 AND h.is_active = 1'.format(
+                    ','.join('?' * len(enumerable_ports))
+                ),
+                list(enumerable_ports) + ['open']
+            )
+        except sqlite3.OperationalError as e:
+            logger.error(f"Failed to query enumerable ports: {e}")
+            conn.close()
+            return results
 
         host_ports: Dict[str, List[int]] = {}
         for row in cursor:
@@ -1453,20 +1488,45 @@ class ServiceEnumerator:
             except sqlite3.OperationalError:
                 pass  # hosts table may not exist yet
 
+            if host_id is None:
+                logger.warning(f"Skipping service enumeration save for {ip}:{port} (host not in DB)")
+                conn.close()
+                return
+
+            now = datetime.now(timezone.utc).isoformat()
+            details_text = json.dumps({
+                'enum_data': enum_data,
+                'findings': findings,
+                'risk_level': risk_level,
+            }, default=str)
+            title = findings[0] if findings else f"{service_type} enumeration"
+            severity = risk_level if risk_level in {'critical', 'high', 'medium', 'low', 'info'} else 'info'
+
+            cols = {
+                row[1] for row in conn.execute(
+                    'PRAGMA table_info(service_enumeration)'
+                ).fetchall()
+            }
+            payload = {
+                'host_id': host_id,
+                'ip': ip,
+                'port': port,
+                'service_type': service_type,
+                'finding_type': 'enumeration',
+                'severity': severity,
+                'risk_level': risk_level,
+                'title': title,
+                'details': details_text,
+                'findings': json.dumps(findings),
+                'enum_data': json.dumps(enum_data, default=str),
+                'discovered_at': now,
+                'enumerated_at': now,
+            }
+            insert_cols = [c for c in payload.keys() if c in cols]
+            placeholders = ', '.join('?' for _ in insert_cols)
             conn.execute(
-                '''INSERT INTO service_enumeration
-                   (host_id, ip, port, service_type, enum_data, findings, risk_level, enumerated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                (
-                    host_id,
-                    ip,
-                    port,
-                    service_type,
-                    json.dumps(enum_data, default=str),
-                    json.dumps(findings),
-                    risk_level,
-                    datetime.now(timezone.utc).isoformat(),
-                )
+                f"INSERT INTO service_enumeration ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                tuple(payload[c] for c in insert_cols),
             )
             conn.commit()
             conn.close()

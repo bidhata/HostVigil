@@ -3,436 +3,339 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}HostVigil{% endblock %} | Security Operations</title>
-
-    <!-- Google Fonts - Open Sans -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Bootstrap 5 -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <title>{% block title %}HostVigil{% endblock %}</title>
+    <!-- Google Fonts - Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Bootstrap Icons -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <!-- Custom Styles -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     {% block head_extra %}{% endblock %}
     <script>
-        // Apply saved theme immediately to prevent flash
         (function() {
-            const saved = localStorage.getItem('hv-theme') || 'light';
+            var saved = localStorage.getItem('hv-theme') || 'light';
             document.documentElement.setAttribute('data-theme', saved);
         })();
     </script>
+    <style>
+    .toast-item {
+        padding: 10px 14px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-family: var(--font);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        animation: slideIn 0.3s ease;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        color: var(--text);
+    }
+    .toast-success { border-left: 3px solid var(--success); }
+    .toast-error { border-left: 3px solid var(--danger); }
+    .toast-info { border-left: 3px solid var(--accent); }
+    .toast-close {
+        margin-left: auto;
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 16px;
+        padding: 0 4px;
+    }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+    .scan-active-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--success);
+        animation: pulse-dot 1.5s infinite;
+        margin-left: 6px;
+        display: inline-block;
+    }
+    @keyframes pulse-dot {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+    </style>
 </head>
 <body>
     <!-- Sidebar -->
-    <nav class="porto-sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="sidebar-logo">
-                <i class="bi bi-shield-check"></i>
-            </div>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <i class="bi bi-shield-check"></i>
+            <span class="brand-text">HostVigil</span>
         </div>
-
         <div class="sidebar-nav">
-            <ul class="nav-list">
-                <li class="nav-item">
-                    <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" title="Overview">
-                        <i class="bi bi-grid-1x2"></i>
-                        <span class="nav-label">Overview</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{{ url_for('hosts') }}" class="nav-link {% if request.endpoint == 'hosts' %}active{% endif %}" title="Hosts">
-                        <i class="bi bi-hdd-network"></i>
-                        <span class="nav-label">Hosts</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{{ url_for('vulnerabilities') }}" class="nav-link {% if request.endpoint == 'vulnerabilities' %}active{% endif %}" title="Vulnerabilities">
-                        <i class="bi bi-shield-exclamation"></i>
-                        <span class="nav-label">Vulns</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{{ url_for('anomalies') }}" class="nav-link {% if request.endpoint == 'anomalies' %}active{% endif %}" title="Anomalies">
-                        <i class="bi bi-activity"></i>
-                        <span class="nav-label">Anomalies</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{{ url_for('redteam') }}" class="nav-link {% if request.endpoint == 'redteam' %}active{% endif %}" title="Red Team">
-                        <i class="bi bi-bullseye"></i>
-                        <span class="nav-label">Red Team</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{{ url_for('scan_controls') }}" class="nav-link {% if request.endpoint == 'scan_controls' %}active{% endif %}" title="Scan Controls">
-                        <i class="bi bi-radar"></i>
-                        <span class="nav-label">Scans</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{{ url_for('network_graph') }}" class="nav-link {% if request.endpoint == 'network_graph' %}active{% endif %}" title="Network Map">
-                        <i class="bi bi-diagram-3"></i>
-                        <span class="nav-label">Network</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{{ url_for('attack_paths') }}" class="nav-link {% if request.endpoint == 'attack_paths' %}active{% endif %}" title="Attack Paths">
-                        <i class="bi bi-signpost-split"></i>
-                        <span class="nav-label">Paths</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{{ url_for('mitre_heatmap') }}" class="nav-link {% if request.endpoint == 'mitre_heatmap' %}active{% endif %}" title="MITRE ATT&CK">
-                        <i class="bi bi-grid-3x3"></i>
-                        <span class="nav-label">MITRE</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{{ url_for('diff_view') }}" class="nav-link {% if request.endpoint == 'diff_view' %}active{% endif %}" title="Diff View">
-                        <i class="bi bi-arrow-left-right"></i>
-                        <span class="nav-label">Diff</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="{{ url_for('notes') }}" class="nav-link {% if request.endpoint == 'notes' %}active{% endif %}" title="Notes">
-                        <i class="bi bi-journal-text"></i>
-                        <span class="nav-label">Notes</span>
-                    </a>
-                </li>
-            </ul>
-        </div>
-
-        <div class="sidebar-footer">
-            <div class="status-indicator" title="Monitoring Active">
-                <span class="status-pulse"></span>
-            </div>
+            <a href="{{ url_for('index') }}" class="nav-item {% if request.endpoint == 'index' %}active{% endif %}" title="Overview">
+                <i class="bi bi-grid"></i>
+                <span class="nav-label">Overview</span>
+            </a>
+            <a href="{{ url_for('hosts') }}" class="nav-item {% if request.endpoint == 'hosts' %}active{% endif %}" title="Hosts">
+                <i class="bi bi-server"></i>
+                <span class="nav-label">Hosts</span>
+            </a>
+            <a href="{{ url_for('vulnerabilities') }}" class="nav-item {% if request.endpoint == 'vulnerabilities' %}active{% endif %}" title="Vulnerabilities">
+                <i class="bi bi-shield"></i>
+                <span class="nav-label">Vulns</span>
+            </a>
+            <a href="{{ url_for('anomalies') }}" class="nav-item {% if request.endpoint == 'anomalies' %}active{% endif %}" title="Anomalies">
+                <i class="bi bi-activity"></i>
+                <span class="nav-label">Anomalies</span>
+            </a>
+            <a href="{{ url_for('redteam') }}" class="nav-item {% if request.endpoint == 'redteam' %}active{% endif %}" title="Red Team">
+                <i class="bi bi-crosshair"></i>
+                <span class="nav-label">Red Team</span>
+            </a>
+            <a href="{{ url_for('scan_controls') }}" class="nav-item {% if request.endpoint == 'scan_controls' %}active{% endif %}" title="Scans">
+                <i class="bi bi-play-circle"></i>
+                <span class="nav-label">Scans</span>
+                <span class="scan-active-dot" id="scanActiveDot" style="display:none;"></span>
+            </a>
+            <a href="{{ url_for('network_graph') }}" class="nav-item {% if request.endpoint == 'network_graph' %}active{% endif %}" title="Network">
+                <i class="bi bi-share"></i>
+                <span class="nav-label">Network</span>
+            </a>
+            <a href="{{ url_for('attack_paths') }}" class="nav-item {% if request.endpoint == 'attack_paths' %}active{% endif %}" title="Attack Paths">
+                <i class="bi bi-git"></i>
+                <span class="nav-label">Paths</span>
+            </a>
+            <a href="{{ url_for('mitre_heatmap') }}" class="nav-item {% if request.endpoint == 'mitre_heatmap' %}active{% endif %}" title="MITRE">
+                <i class="bi bi-layers"></i>
+                <span class="nav-label">MITRE</span>
+            </a>
+            <a href="{{ url_for('diff_view') }}" class="nav-item {% if request.endpoint == 'diff_view' %}active{% endif %}" title="Diff">
+                <i class="bi bi-layout-split"></i>
+                <span class="nav-label">Diff</span>
+            </a>
+            <a href="{{ url_for('notes') }}" class="nav-item {% if request.endpoint == 'notes' %}active{% endif %}" title="Notes">
+                <i class="bi bi-file-text"></i>
+                <span class="nav-label">Notes</span>
+            </a>
         </div>
     </nav>
 
-    <!-- Main Content Area -->
-    <div class="porto-content-wrapper" id="mainWrapper">
-        <!-- Top Header -->
-        <header class="porto-header">
-            <div class="header-left">
-                <button class="btn btn-link sidebar-toggle d-lg-none" id="sidebarToggle">
+    <!-- Main Content -->
+    <div class="content-wrapper" id="mainWrapper">
+        <header class="header">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <button class="icon-btn" id="sidebarToggle" style="display:none;">
                     <i class="bi bi-list"></i>
                 </button>
-                <div class="header-breadcrumb">
-                    <h4 class="page-title">{% block page_title %}Dashboard{% endblock %}</h4>
-                    <nav aria-label="breadcrumb">
-                        <ol class="breadcrumb">
-                            <li class="breadcrumb-item"><a href="{{ url_for('index') }}">HostVigil</a></li>
-                            {% block breadcrumb %}
-                            <li class="breadcrumb-item active" aria-current="page">Overview</li>
-                            {% endblock %}
-                        </ol>
-                    </nav>
-                </div>
+                <h1 class="header-title">{% block page_title %}Dashboard{% endblock %}</h1>
             </div>
-            <div class="header-right">
-                <!-- Auto-refresh countdown -->
-                <div class="refresh-indicator" id="refreshIndicator" title="Auto-refresh countdown">
-                    <svg class="refresh-ring" viewBox="0 0 20 20">
-                        <circle class="refresh-ring-bg" cx="10" cy="10" r="8"></circle>
-                        <circle class="refresh-ring-fill" cx="10" cy="10" r="8" id="refreshRing"></circle>
-                    </svg>
-                    <span class="refresh-count" id="refreshCount">15</span>
-                </div>
-
-                <!-- Scan Status -->
-                <div class="header-badge" id="scanStatusIndicator">
-                    <span class="status-dot status-idle"></span>
-                    <span class="status-text" id="scanStatusText">Idle</span>
-                </div>
-
-                <!-- Last Scan -->
-                <div class="header-meta">
-                    <span class="meta-label">Last scan:</span>
-                    <span class="meta-value mono" id="lastScanTime">—</span>
-                </div>
-
-                <!-- Export Dropdown -->
-                <div class="dropdown">
-                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="bi bi-download"></i> Export
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end">
-                        <li><a class="dropdown-item" href="/api/export/json"><i class="bi bi-filetype-json me-2"></i>Export JSON</a></li>
-                        <li><a class="dropdown-item" href="/api/export/csv"><i class="bi bi-filetype-csv me-2"></i>Export CSV</a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="/api/export/report"><i class="bi bi-file-earmark-pdf me-2"></i>Generate Report</a></li>
-                        <li><a class="dropdown-item" href="/api/export/zip"><i class="bi bi-file-zip me-2"></i>Full Package (ZIP)</a></li>
-                    </ul>
-                </div>
-
-                <!-- Theme Toggle -->
-                <button class="btn btn-sm btn-icon theme-toggle" id="themeToggle" title="Toggle light/dark theme">
-                    <i class="bi bi-moon-fill" id="themeIcon"></i>
+            <div class="header-controls">
+                <button class="btn-primary" id="quickNuclei" title="Run Nuclei Scan" onclick="quickScan('nuclei')">
+                    <i class="bi bi-bug"></i> Nuclei
                 </button>
-
-                <!-- Stealth Mode Toggle -->
-                <button class="btn btn-sm btn-icon stealth-toggle" id="stealthToggle" title="Toggle stealth mode">
-                    <i class="bi bi-eye-slash-fill" id="stealthIcon"></i>
+                <button class="btn-ghost" id="quickPortScan" title="Run TCP Port Scan" onclick="quickScan('scan')">
+                    <i class="bi bi-ethernet"></i> Port Scan
                 </button>
-
-                <!-- User -->
-                <div class="header-user">
-                    <div class="user-avatar">
-                        <i class="bi bi-person-circle"></i>
-                    </div>
-                </div>
+                <button class="icon-btn" id="themeToggle" title="Toggle theme">
+                    <i class="bi bi-moon" id="themeIcon"></i>
+                </button>
+                <button class="icon-btn" id="stealthToggle" title="Stealth mode">
+                    <i class="bi bi-eye-slash"></i>
+                </button>
+                <button class="icon-btn" title="Logout" style="font-size:16px;" onclick="window.location.href='/logout'">
+                    <i class="bi bi-box-arrow-right"></i>
+                </button>
             </div>
         </header>
 
-        <!-- Page Content -->
-        <main class="porto-page-content">
+        <main class="page-content">
             {% block content %}{% endblock %}
         </main>
     </div>
 
-    <!-- Toast Container -->
-    <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
-
-    <!-- Bootstrap JS Bundle -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
-    <!-- Core JS: Theme, Refresh, Toasts, Polling -->
+    <!-- Core JS -->
     <script>
     (function() {
-        // ============================================================
-        // THEME TOGGLE (light ↔ dark) & STEALTH TOGGLE
-        // ============================================================
-        const themeToggle = document.getElementById('themeToggle');
-        const themeIcon = document.getElementById('themeIcon');
-        const stealthToggle = document.getElementById('stealthToggle');
+        // Theme
+        var themeToggle = document.getElementById('themeToggle');
+        var themeIcon = document.getElementById('themeIcon');
+        var stealthToggle = document.getElementById('stealthToggle');
 
-        function setTheme(theme) {
-            document.documentElement.setAttribute('data-theme', theme);
-            localStorage.setItem('hv-theme', theme);
-            updateThemeIcons(theme);
+        function setTheme(t) {
+            document.documentElement.setAttribute('data-theme', t);
+            localStorage.setItem('hv-theme', t);
+            themeIcon.className = t === 'dark' ? 'bi bi-sun' : 'bi bi-moon';
         }
 
-        function updateThemeIcons(theme) {
-            if (theme === 'dark') {
-                themeIcon.className = 'bi bi-sun-fill';
-            } else if (theme === 'stealth') {
-                themeIcon.className = 'bi bi-moon-fill';
-            } else {
-                themeIcon.className = 'bi bi-moon-fill';
-            }
-        }
-
-        // Theme toggle cycles between light and dark only
-        themeToggle.addEventListener('click', () => {
-            const current = document.documentElement.getAttribute('data-theme');
-            if (current === 'stealth') {
-                setTheme('light');
-            } else if (current === 'dark') {
-                setTheme('light');
-            } else {
-                setTheme('dark');
-            }
+        themeToggle.addEventListener('click', function() {
+            var cur = document.documentElement.getAttribute('data-theme');
+            setTheme(cur === 'dark' ? 'light' : cur === 'stealth' ? 'light' : 'dark');
         });
 
-        // Stealth toggle: enter stealth from any theme, or exit to light
-        stealthToggle.addEventListener('click', () => {
-            const current = document.documentElement.getAttribute('data-theme');
-            if (current === 'stealth') {
-                setTheme('light');
-            } else {
-                setTheme('stealth');
-            }
+        stealthToggle.addEventListener('click', function() {
+            var cur = document.documentElement.getAttribute('data-theme');
+            setTheme(cur === 'stealth' ? 'light' : 'stealth');
         });
 
-        // Apply saved theme icon state
-        const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
-        updateThemeIcons(currentTheme);
+        var cur = document.documentElement.getAttribute('data-theme') || 'light';
+        themeIcon.className = cur === 'dark' ? 'bi bi-sun' : 'bi bi-moon';
 
-        // ============================================================
-        // AUTO-REFRESH COUNTDOWN
-        // ============================================================
-        const POLL_INTERVAL = 15;
-        let countdown = POLL_INTERVAL;
-        const refreshRing = document.getElementById('refreshRing');
-        const refreshCount = document.getElementById('refreshCount');
-        const circumference = 2 * Math.PI * 8;
+        // Mobile sidebar
+        var sidebarBtn = document.getElementById('sidebarToggle');
+        if (window.innerWidth < 992) sidebarBtn.style.display = 'flex';
+        sidebarBtn.addEventListener('click', function() {
+            document.getElementById('sidebar').classList.toggle('show');
+        });
 
-        if (refreshRing) {
-            refreshRing.style.strokeDasharray = circumference;
-            refreshRing.style.strokeDashoffset = '0';
-        }
-
-        function updateCountdown() {
-            countdown--;
-            if (countdown <= 0) {
-                countdown = POLL_INTERVAL;
-                pollLiveData();
-            }
-            if (refreshCount) refreshCount.textContent = countdown;
-            if (refreshRing) {
-                const progress = (POLL_INTERVAL - countdown) / POLL_INTERVAL;
-                refreshRing.style.strokeDashoffset = circumference * (1 - progress);
-            }
-        }
-
-        setInterval(updateCountdown, 1000);
-
-        // ============================================================
-        // TOAST NOTIFICATIONS
-        // ============================================================
-        window.hvToast = function(message, type = 'info', duration = 5000) {
-            const container = document.getElementById('toastContainer');
-            const icons = { success: 'check-circle-fill', error: 'exclamation-triangle-fill', info: 'info-circle-fill', warning: 'exclamation-circle-fill' };
-            const id = 'toast-' + Date.now();
-            const html = `
-                <div class="hv-toast hv-toast-${type}" id="${id}">
-                    <i class="bi bi-${icons[type] || icons.info}"></i>
-                    <span class="toast-msg">${message}</span>
-                    <button class="toast-close" onclick="this.parentElement.remove()">&times;</button>
-                </div>`;
-            container.insertAdjacentHTML('beforeend', html);
-            setTimeout(() => {
-                const el = document.getElementById(id);
-                if (el) { el.classList.add('hv-toast-exit'); setTimeout(() => el.remove(), 300); }
-            }, duration);
-        };
-
-        // ============================================================
-        // GLOBAL AUTH INTERCEPTOR
-        // Redirects to login when any API call returns 401 (session expired)
-        // ============================================================
-        const _originalFetch = window.fetch;
-        window.fetch = function(...args) {
-            return _originalFetch(...args).then(response => {
-                if (response.status === 401) {
-                    const url = typeof args[0] === 'string' ? args[0] : args[0].url;
-                    // Don't redirect for the public polling endpoint
-                    if (!url.includes('/api/pipeline/live')) {
-                        window.location.href = '/login';
-                        return new Response(JSON.stringify({error: 'Session expired'}), {status: 401});
-                    }
-                }
-                return response;
-            });
-        };
-
-        // ============================================================
-        // LIVE POLLING
-        // ============================================================
-        let prevScanState = null;
-        let prevAnomalyCount = null;
-
-        function updateDashboardStats(data) {
-            const stats = data.stats || {};
-            if (stats.total_hosts !== undefined) {
-                const el = document.getElementById('stat-hosts');
-                if (el) el.textContent = stats.total_hosts;
-            }
-            if (stats.total_ports !== undefined) {
-                const el = document.getElementById('stat-ports');
-                if (el) el.textContent = stats.total_ports;
-            }
-            if (stats.vulnerabilities) {
-                const critEl = document.getElementById('stat-vulns-critical');
-                if (critEl) critEl.textContent = stats.vulnerabilities.critical;
-                const highEl = document.getElementById('stat-vulns-high');
-                if (highEl) highEl.textContent = stats.vulnerabilities.high;
-                const totalEl = document.getElementById('stat-vulns-total');
-                if (totalEl) totalEl.textContent = stats.vulnerabilities.total;
-            }
-            if (stats.active_anomalies !== undefined) {
-                const el = document.getElementById('stat-anomalies');
-                if (el) el.textContent = stats.active_anomalies;
-                // Toast on new anomalies
-                if (prevAnomalyCount !== null && stats.active_anomalies > prevAnomalyCount) {
-                    const diff = stats.active_anomalies - prevAnomalyCount;
-                    hvToast(`${diff} new anomal${diff > 1 ? 'ies' : 'y'} detected`, 'warning');
-                }
-                prevAnomalyCount = stats.active_anomalies;
-            }
-
-            // Live-update charts (if they exist on this page)
-            if (window.hvThreatChart && stats.total_hosts !== undefined) {
-                window.hvThreatChart.data.datasets[0].data = [
-                    stats.total_hosts || 0,
-                    stats.total_ports || 0,
-                    stats.vulnerabilities ? stats.vulnerabilities.total : 0,
-                    stats.active_anomalies || 0
-                ];
-                window.hvThreatChart.update();
-            }
-            if (window.hvVulnChart && stats.vulnerabilities) {
-                window.hvVulnChart.data.datasets[0].data = [
-                    stats.vulnerabilities.critical || 0,
-                    stats.vulnerabilities.high || 0,
-                    stats.vulnerabilities.medium || 0,
-                    stats.vulnerabilities.low || 0,
-                    stats.vulnerabilities.info || 0
-                ];
-                window.hvVulnChart.update();
-            }
-
-            const statusDot = document.querySelector('#scanStatusIndicator .status-dot');
-            const statusText = document.getElementById('scanStatusText');
-            if (statusDot && statusText) {
-                const wasRunning = prevScanState;
-                statusDot.className = 'status-dot';
-                if (data.running) {
-                    statusDot.classList.add('status-running');
-                    statusText.textContent = 'Scanning';
-                } else {
-                    statusDot.classList.add('status-idle');
-                    statusText.textContent = 'Idle';
-                    // Toast when scan completes
-                    if (wasRunning === true) {
-                        hvToast('Scan cycle completed', 'success');
-                    }
-                }
-                prevScanState = data.running;
-            }
-
-            if (data.last_scan_time) {
-                const el = document.getElementById('lastScanTime');
-                if (el) el.textContent = data.last_scan_time;
-            }
-
-            if (data.last_scan) {
-                const typeEl = document.getElementById('last-scan-type');
-                if (typeEl) typeEl.textContent = data.last_scan.scan_type || '—';
-                const startEl = document.getElementById('last-scan-started');
-                if (startEl) startEl.textContent = data.last_scan.start_time || '—';
-                const endEl = document.getElementById('last-scan-ended');
-                if (endEl) endEl.textContent = data.last_scan.end_time || '—';
-                const hostsEl = document.getElementById('last-scan-hosts');
-                if (hostsEl) hostsEl.textContent = data.last_scan.hosts_found || '0';
-                const portsEl = document.getElementById('last-scan-ports');
-                if (portsEl) portsEl.textContent = data.last_scan.ports_found || '0';
-            }
-        }
+        // Auto-refresh (invisible)
+        var POLL_INTERVAL = 15;
+        var countdown = POLL_INTERVAL;
 
         function pollLiveData() {
             fetch('/api/pipeline/live')
-                .then(response => {
-                    if (!response.ok) throw new Error('Poll failed');
-                    return response.json();
-                })
-                .then(data => { updateDashboardStats(data); })
-                .catch(err => { console.warn('Live poll error:', err.message); });
+                .then(function(r) { if (!r.ok) throw new Error(); return r.json(); })
+                .then(function(data) { updateStats(data); })
+                .catch(function() {});
         }
 
-        // Initial poll
-        pollLiveData();
-    })();
+        function updateStats(data) {
+            var stats = data.stats || {};
+            var el;
+            el = document.getElementById('stat-hosts'); if (el && stats.total_hosts !== undefined) el.textContent = stats.total_hosts.toLocaleString();
+            el = document.getElementById('stat-ports'); if (el && stats.total_ports !== undefined) el.textContent = stats.total_ports.toLocaleString();
+            el = document.getElementById('stat-critical'); if (el && stats.vulnerabilities) el.textContent = stats.vulnerabilities.critical;
+            el = document.getElementById('stat-anomalies'); if (el && stats.active_anomalies !== undefined) el.textContent = stats.active_anomalies;
+        }
 
-    // Sidebar toggle for mobile
-    document.getElementById('sidebarToggle')?.addEventListener('click', function() {
-        document.getElementById('sidebar').classList.toggle('show');
-    });
+        setInterval(function() {
+            countdown--;
+            if (countdown <= 0) { countdown = POLL_INTERVAL; pollLiveData(); }
+        }, 1000);
+
+        pollLiveData();
+
+        // Global auth interceptor
+        var _fetch = window.fetch;
+        window.fetch = function() {
+            return _fetch.apply(this, arguments).then(function(r) {
+                if (r.status === 401) { window.location.href = '/login'; }
+                return r;
+            });
+        };
+
+        // Quick scan buttons (Nuclei & Port Scan)
+        window.quickScan = function(scanType) {
+            var btn = document.getElementById(scanType === 'nuclei' ? 'quickNuclei' : 'quickPortScan');
+            var origHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Running...';
+
+            fetch('/api/scan/trigger', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({scan_type: scanType})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    btn.innerHTML = '<i class="bi bi-x-circle"></i> ' + (data.error.length > 30 ? data.error.substring(0, 30) + '...' : data.error);
+                    setTimeout(function() { btn.disabled = false; btn.innerHTML = origHtml; }, 3000);
+                } else {
+                    btn.innerHTML = '<i class="bi bi-check-circle"></i> Started';
+                    setTimeout(function() { btn.disabled = false; btn.innerHTML = origHtml; }, 5000);
+                }
+            })
+            .catch(function(err) {
+                btn.innerHTML = '<i class="bi bi-x-circle"></i> Failed';
+                setTimeout(function() { btn.disabled = false; btn.innerHTML = origHtml; }, 3000);
+            });
+        };
+
+        // Toast Notification System
+        window.showToast = function(message, type) {
+            type = type || 'info';
+            var container = document.getElementById('toastContainer');
+            if (!container) return;
+            var toast = document.createElement('div');
+            toast.className = 'toast-item toast-' + type;
+            var icon = type === 'success' ? '✓' : type === 'error' ? '✗' : 'ℹ';
+            toast.innerHTML = '<span>' + icon + '</span><span>' + message + '</span><button class="toast-close" onclick="this.parentElement.remove()">×</button>';
+            container.appendChild(toast);
+            setTimeout(function() {
+                toast.style.animation = 'fadeOut 0.3s ease forwards';
+                setTimeout(function() { if (toast.parentElement) toast.remove(); }, 300);
+            }, 5000);
+        };
+
+        // Scan Status Polling
+        var _prevScanStates = {};
+
+        function pollScanStatus() {
+            fetch('/api/scan/status')
+                .then(function(r) { if (!r.ok) throw new Error(); return r.json(); })
+                .then(function(data) {
+                    var scans = data.scans || data;
+                    var anyRunning = false;
+
+                    if (Array.isArray(scans)) {
+                        scans.forEach(function(scan) {
+                            var key = scan.scan_type || scan.id || scan.name;
+                            var state = scan.status || scan.state;
+                            if (state === 'running') anyRunning = true;
+                            var prev = _prevScanStates[key];
+                            if (prev === 'running' && (state === 'completed' || state === 'done')) {
+                                showToast('Scan completed: ' + key, 'success');
+                            } else if (prev === 'running' && (state === 'error' || state === 'failed')) {
+                                showToast('Scan failed: ' + key, 'error');
+                            }
+                            _prevScanStates[key] = state;
+                        });
+                    } else if (typeof scans === 'object') {
+                        Object.keys(scans).forEach(function(key) {
+                            var state = typeof scans[key] === 'string' ? scans[key] : (scans[key].status || scans[key].state);
+                            if (state === 'running') anyRunning = true;
+                            var prev = _prevScanStates[key];
+                            if (prev === 'running' && (state === 'completed' || state === 'done')) {
+                                showToast('Scan completed: ' + key, 'success');
+                            } else if (prev === 'running' && (state === 'error' || state === 'failed')) {
+                                showToast('Scan failed: ' + key, 'error');
+                            }
+                            _prevScanStates[key] = state;
+                        });
+                    }
+
+                    var dot = document.getElementById('scanActiveDot');
+                    if (dot) dot.style.display = anyRunning ? 'inline-block' : 'none';
+                })
+                .catch(function() {});
+        }
+
+        setInterval(pollScanStatus, 5000);
+        pollScanStatus();
+
+        // Keyboard Shortcuts
+        document.addEventListener('keydown', function(e) {
+            var tag = (e.target.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+            if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+            switch (e.key) {
+                case 'n':
+                    quickScan('nuclei');
+                    showToast('Nuclei scan triggered (n)', 'info');
+                    break;
+                case 's':
+                    quickScan('scan');
+                    showToast('Port scan triggered (s)', 'info');
+                    break;
+                case 'd':
+                    quickScan('discover');
+                    showToast('Discovery triggered (d)', 'info');
+                    break;
+            }
+        });
+    })();
     </script>
+
+<!-- Toast Notifications -->
+<div id="toastContainer" style="position:fixed;top:60px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:340px;"></div>
 
     {% block scripts %}{% endblock %}
 </body>

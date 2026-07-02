@@ -124,6 +124,9 @@ class StealthDiscovery:
         # Thread safety for discovered hosts list
         self._results_lock = threading.Lock()
 
+        # Auto-detect local subnets and prioritize them
+        self._target_ranges = self._prioritize_local_subnets(self._target_ranges)
+
         logger.info(
             "StealthDiscovery initialized: techniques=%s, targets=%s",
             self._techniques, self._target_ranges
@@ -151,6 +154,140 @@ class StealthDiscovery:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_hosts_ip ON hosts(ip)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_hosts_active ON hosts(is_active)")
             conn.commit()
+
+    # ------------------------------------------------------------------
+    # Auto-detect Local Network
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _detect_local_subnets() -> List[str]:
+        """Detect the system's local IP addresses and derive their /24 subnets.
+
+        Returns a list of CIDR strings (e.g., ['192.168.1.0/24', '10.0.5.0/24']).
+        Skips loopback, link-local, and virtual/docker interfaces where possible.
+        """
+        local_subnets = []
+        try:
+            # Method 1: Use socket to get all interface addresses (cross-platform)
+            import socket as _socket
+
+            # Get all IPs via connecting to external (doesn't send traffic)
+            # This gives the primary interface IP
+            try:
+                s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+                s.settimeout(0.1)
+                # Connect to a non-routable address to determine primary interface
+                s.connect(('10.255.255.255', 1))
+                primary_ip = s.getsockname()[0]
+                s.close()
+                if primary_ip and not primary_ip.startswith('127.'):
+                    net = ipaddress.ip_network(f'{primary_ip}/24', strict=False)
+                    local_subnets.append(str(net))
+            except Exception:
+                pass
+
+            # Method 2: Use psutil if available for full interface enumeration
+            try:
+                import psutil
+                for iface_name, addrs in psutil.net_if_addrs().items():
+                    # Skip common virtual interface names
+                    skip_names = ('lo', 'loopback', 'docker', 'veth', 'br-', 'virbr')
+                    if any(iface_name.lower().startswith(s) for s in skip_names):
+                        continue
+                    for addr in addrs:
+                        if addr.family == _socket.AF_INET:
+                            ip = addr.address
+                            netmask = addr.netmask
+                            if ip.startswith('127.') or ip.startswith('169.254.'):
+                                continue
+                            try:
+                                if netmask:
+                                    net = ipaddress.IPv4Network(f'{ip}/{netmask}', strict=False)
+                                else:
+                                    net = ipaddress.IPv4Network(f'{ip}/24', strict=False)
+                                subnet_str = str(net)
+                                if subnet_str not in local_subnets:
+                                    local_subnets.append(subnet_str)
+                            except (ValueError, TypeError):
+                                pass
+            except ImportError:
+                pass
+
+            # Method 3: Fallback — parse ipconfig/ifconfig output
+            if not local_subnets:
+                import platform
+                import subprocess as _sp
+                try:
+                    if platform.system() == 'Windows':
+                        output = _sp.check_output(['ipconfig'], text=True, timeout=5)
+                        lines = output.split('\n')
+                        for i, line in enumerate(lines):
+                            if 'IPv4 Address' in line or 'IPv4' in line:
+                                parts = line.split(':')
+                                if len(parts) >= 2:
+                                    ip = parts[-1].strip()
+                                    if ip and not ip.startswith('127.'):
+                                        net = ipaddress.ip_network(f'{ip}/24', strict=False)
+                                        subnet_str = str(net)
+                                        if subnet_str not in local_subnets:
+                                            local_subnets.append(subnet_str)
+                    else:
+                        output = _sp.check_output(['ip', '-4', 'addr', 'show'], text=True, timeout=5)
+                        for line in output.split('\n'):
+                            if 'inet ' in line and '127.' not in line:
+                                # Extract CIDR e.g. "inet 192.168.1.5/24"
+                                parts = line.strip().split()
+                                for p in parts:
+                                    if '/' in p and '.' in p:
+                                        try:
+                                            net = ipaddress.ip_network(p, strict=False)
+                                            subnet_str = str(net)
+                                            if subnet_str not in local_subnets:
+                                                local_subnets.append(subnet_str)
+                                        except ValueError:
+                                            pass
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.warning(f"Failed to auto-detect local subnets: {e}")
+
+        return local_subnets
+
+    def _prioritize_local_subnets(self, target_ranges: List[str]) -> List[str]:
+        """Reorder target_ranges to scan local subnets first.
+
+        Detects the system's own IP subnets, adds them to the front of
+        the target list, then appends remaining configured ranges.
+        This ensures the host's own network is scanned immediately on startup.
+        """
+        local_subnets = self._detect_local_subnets()
+
+        if not local_subnets:
+            logger.info("Could not detect local subnets, using config order")
+            return target_ranges
+
+        logger.info("Auto-detected local subnets: %s (will scan first)", local_subnets)
+
+        # Build prioritized list: local subnets first, then everything else
+        prioritized = list(local_subnets)
+        for r in target_ranges:
+            # Check if already covered by a local subnet
+            try:
+                target_net = ipaddress.ip_network(r, strict=False)
+                already_covered = False
+                for local in local_subnets:
+                    local_net = ipaddress.ip_network(local, strict=False)
+                    if target_net.subnet_of(local_net) or target_net == local_net:
+                        already_covered = True
+                        break
+                if not already_covered and r not in prioritized:
+                    prioritized.append(r)
+            except (ValueError, TypeError):
+                if r not in prioritized:
+                    prioritized.append(r)
+
+        return prioritized
 
     # ------------------------------------------------------------------
     # Public API

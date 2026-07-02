@@ -14,6 +14,7 @@ Usage:
     python run.py kill       - Kill a running daemon process
     python run.py dashboard  - Start the web dashboard
     python run.py status     - Show current database status
+    python run.py init --fresh [--force] - Reset DB/logs/scan results and start fresh
 """
 
 import sys
@@ -584,7 +585,83 @@ def cmd_paths(orchestrator: HostVigilOrchestrator, args: argparse.Namespace) -> 
 
 
 def cmd_init(orchestrator_unused, args: argparse.Namespace) -> int:
-    """Interactive config wizard."""
+    """Interactive config wizard or fresh-state reset."""
+    if getattr(args, 'fresh', False):
+        import shutil
+        from hostvigil.utils import init_database
+
+        print("[!] FRESH INIT: This will delete all local HostVigil DB files, logs, and scan results.")
+        print("[!] Targets include: data/*.db*, data/*.sqlite*, data/logs/, data/scans/, data/reports/, out.csv/")
+        print("[!] Also removes Python caches: **/__pycache__/ and *.pyc/*.pyo")
+        print()
+
+        if not getattr(args, 'force', False):
+            confirm = input("[?] Type 'FRESH' to confirm: ").strip()
+            if confirm != 'FRESH':
+                print("[*] Aborted.")
+                return 1
+
+        data_dir = Path('data')
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+        deleted_files = 0
+        cleaned_dirs = 0
+
+        # Remove DB artifacts and SQLite snapshots/backups under data/.
+        for pattern in ('*.db*', '*.sqlite*'):
+            for file_path in data_dir.glob(pattern):
+                if file_path.is_file():
+                    file_path.unlink(missing_ok=True)
+                    deleted_files += 1
+
+        # Remove daemon pid marker if present.
+        pid_file = data_dir / '.hostvigil.pid'
+        if pid_file.exists():
+            pid_file.unlink(missing_ok=True)
+            deleted_files += 1
+
+        # Clean scan/log output directories and recreate empty structure.
+        output_dirs = [
+            data_dir / 'logs',
+            data_dir / 'scans',
+            data_dir / 'reports',
+            Path('out.csv'),
+        ]
+        for dir_path in output_dirs:
+            if dir_path.exists():
+                if dir_path.is_dir():
+                    shutil.rmtree(dir_path)
+                else:
+                    dir_path.unlink(missing_ok=True)
+            dir_path.mkdir(parents=True, exist_ok=True)
+            cleaned_dirs += 1
+
+        # Recreate a clean primary database.
+        conn = init_database(data_dir / 'hostvigil.db')
+        conn.close()
+
+        # Remove Python bytecode caches across the project.
+        project_root = Path('.')
+        pycache_dirs_removed = 0
+        pyc_files_removed = 0
+
+        for pycache_dir in project_root.rglob('__pycache__'):
+            if pycache_dir.is_dir():
+                shutil.rmtree(pycache_dir, ignore_errors=True)
+                pycache_dirs_removed += 1
+
+        for pattern in ('*.pyc', '*.pyo'):
+            for pyc_file in project_root.rglob(pattern):
+                if pyc_file.is_file():
+                    pyc_file.unlink(missing_ok=True)
+                    pyc_files_removed += 1
+
+        print(f"[+] Fresh init complete. Deleted files: {deleted_files}, reset dirs: {cleaned_dirs}")
+        print(f"[*] Python cache cleanup: removed {pycache_dirs_removed} __pycache__ dirs and {pyc_files_removed} bytecode files")
+        print("[*] Clean database created at data/hostvigil.db")
+        print("[*] Start scanning with: python run.py daemon")
+        return 0
+
     import yaml
 
     config_path = Path('config.yaml')
@@ -829,6 +906,8 @@ def main() -> int:
 
     # init
     sub_init = subparsers.add_parser('init', help='Interactive configuration wizard')
+    sub_init.add_argument('--fresh', action='store_true', help='Delete DBs/logs/scan results and recreate a clean DB')
+    sub_init.add_argument('--force', action='store_true', help='Skip confirmation prompt when used with --fresh')
     sub_init.set_defaults(func=cmd_init)
 
     args = parser.parse_args()

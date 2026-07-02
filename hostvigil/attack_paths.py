@@ -212,26 +212,28 @@ class AttackPathEngine:
         # Service enumeration findings
         try:
             findings['enum'] = [dict(r) for r in conn.execute(
-                'SELECT * FROM service_enumeration'
+                'SELECT se.*, h.ip, h.hostname FROM service_enumeration se '
+                'LEFT JOIN hosts h ON h.id = se.host_id'
             ).fetchall()]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to load service_enumeration findings: %s", e)
 
         # Credential spray results
         try:
             findings['creds'] = [dict(r) for r in conn.execute(
-                'SELECT * FROM credential_results WHERE success = 1'
+                'SELECT c.*, h.ip, h.hostname FROM credential_results c '
+                'JOIN hosts h ON h.id = c.host_id WHERE c.success = 1'
             ).fetchall()]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to load credential_results findings: %s", e)
 
         # TLS findings
         try:
             findings['tls'] = [dict(r) for r in conn.execute(
                 'SELECT * FROM tls_certificates WHERE is_expired = 1 OR is_self_signed = 1'
             ).fetchall()]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to load tls_certificates findings: %s", e)
 
         return findings
 
@@ -241,11 +243,22 @@ class AttackPathEngine:
 
         # Check for unauthenticated services
         for enum in findings.get('enum', []):
+            data = {}
             try:
                 data = json.loads(enum.get('enum_data', '{}') or '{}')
             except (json.JSONDecodeError, TypeError):
                 data = {}
-            risk = enum.get('risk_level', 'info')
+
+            # Newer schemas store summary data in details and severity in severity.
+            if not data and enum.get('details'):
+                try:
+                    details_data = json.loads(enum.get('details', '{}') or '{}')
+                    if isinstance(details_data, dict):
+                        data = details_data.get('enum_data', {}) if isinstance(details_data.get('enum_data', {}), dict) else {}
+                except (json.JSONDecodeError, TypeError):
+                    data = {}
+
+            risk = (enum.get('risk_level') or enum.get('severity') or 'info').lower()
 
             if risk in ('critical', 'high'):
                 technique = None

@@ -211,7 +211,9 @@
     </div>
 
 </div>
+{% endblock %}
 
+{% block scripts %}
 <script>
 const HOST_IP = '{{ host.ip }}';
 
@@ -221,7 +223,7 @@ function hostAction(scanType) {
     if (btn) btn.disabled = true;
     statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running ' + scanType + '...';
 
-    fetch('/api/hosts/' + HOST_IP + '/scan', {
+    fetch('/api/hosts/' + encodeURIComponent(HOST_IP) + '/scan', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({scan_type: scanType})
@@ -232,9 +234,11 @@ function hostAction(scanType) {
             statusEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + data.error + '</span>';
             if (btn) btn.disabled = false;
         } else {
-            statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + data.message + '</span>';
+            statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + data.message + ' — refreshing in 8s...</span>';
             // Re-enable after 5 seconds
             setTimeout(() => { if (btn) btn.disabled = false; statusEl.textContent = ''; }, 5000);
+            // Auto-refresh page after scan completes (8 seconds)
+            setTimeout(() => { window.location.reload(); }, 8000);
         }
     })
     .catch(err => {
