@@ -1,0 +1,429 @@
+{% extends "base.html" %}
+
+{% block title %}Attack Paths{% endblock %}
+{% block page_title %}Attack Paths{% endblock %}
+
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Attack Paths</li>
+{% endblock %}
+
+{% block head_extra %}
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+#attack-graph-container {
+    width: 100%;
+    height: 500px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: #ffffff;
+    position: relative;
+}
+.risk-meter {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-card);
+}
+.risk-meter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.risk-meter-header h5 {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+.risk-score-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+}
+.risk-score-value.critical { color: var(--porto-danger); }
+.risk-score-value.high { color: #ff6d00; }
+.risk-score-value.medium { color: #e6a000; }
+.risk-score-value.low { color: var(--porto-success); }
+.risk-bar-track {
+    height: 10px;
+    background: var(--border-light);
+    border-radius: 5px;
+    overflow: hidden;
+}
+.risk-bar-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.6s ease-out;
+}
+.risk-bar-fill.critical { background: linear-gradient(90deg, #ff6d00, #dc3545); }
+.risk-bar-fill.high { background: linear-gradient(90deg, #ffc107, #ff6d00); }
+.risk-bar-fill.medium { background: linear-gradient(90deg, #28a745, #ffc107); }
+.risk-bar-fill.low { background: linear-gradient(90deg, #28a745, #17a2b8); }
+.risk-summary {
+    margin-top: 10px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+.stats-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+.stat-card {
+    flex: 1;
+    min-width: 130px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 14px 16px;
+    text-align: center;
+    box-shadow: var(--shadow-card);
+}
+.stat-card .stat-num {
+    font-size: 1.4rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+}
+.stat-card .stat-label {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+}
+.stat-card.red .stat-num { color: var(--porto-danger); }
+.stat-card.orange .stat-num { color: #e6a000; }
+.stat-card.purple .stat-num { color: #6f42c1; }
+.stat-card.blue .stat-num { color: var(--porto-primary); }
+.graph-legend-ap {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 16px;
+    z-index: 10;
+    font-size: 0.72rem;
+    box-shadow: var(--shadow-sm);
+}
+.graph-legend-ap h6 {
+    margin-bottom: 8px;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+}
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 5px;
+}
+.legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+.legend-label { color: var(--text-primary); }
+.chain-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+.chain-table th {
+    background: #fafbfc;
+    padding: 10px 12px;
+    text-align: left;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.68rem;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid var(--border-color);
+}
+.chain-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-light);
+    color: var(--text-primary);
+    vertical-align: middle;
+}
+.chain-table tr:hover td { background: #f8f9fa; }
+.severity-badge.critical { background: #fce4e6; color: #dc3545; }
+.severity-badge.high { background: #fff3cd; color: #856404; }
+.severity-badge.medium { background: #d1ecf1; color: #0c5460; }
+.severity-badge.low { background: #d4edda; color: #155724; }
+.mitre-tag {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--porto-primary);
+    background: #e3f2fd;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+.step-arrow {
+    color: var(--text-muted);
+    margin: 0 6px;
+    font-weight: bold;
+}
+.loading-overlay {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255, 255, 255, 0.85); z-index: 100; border-radius: 8px;
+}
+.section-header {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    margin: 20px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-light);
+    font-weight: 600;
+}
+.no-data-msg {
+    text-align: center;
+    padding: 50px 20px;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+.no-data-msg i { font-size: 2.5rem; display: block; margin-bottom: 12px; opacity: 0.5; }
+.no-data-msg p { font-size: 0.82rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Risk Meter -->
+<div class="risk-meter" id="risk-meter">
+    <div class="risk-meter-header">
+        <h5><i class="bi bi-signpost-split me-2"></i>Attack Path Risk Assessment</h5>
+        <span class="risk-score-value low" id="risk-score-display">0</span>
+    </div>
+    <div class="risk-bar-track">
+        <div class="risk-bar-fill low" id="risk-bar-fill" style="width: 0%;"></div>
+    </div>
+    <div class="risk-summary" id="risk-summary">Analyzing attack paths...</div>
+</div>
+
+<!-- Stats Cards -->
+<div class="stats-row">
+    <div class="stat-card red">
+        <div class="stat-num" id="stat-initial">0</div>
+        <div class="stat-label">Initial Access</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-num" id="stat-lateral">0</div>
+        <div class="stat-label">Lateral Movement</div>
+    </div>
+    <div class="stat-card purple">
+        <div class="stat-num" id="stat-privesc">0</div>
+        <div class="stat-label">Priv Escalation</div>
+    </div>
+    <div class="stat-card blue">
+        <div class="stat-num" id="stat-chains">0</div>
+        <div class="stat-label">Attack Chains</div>
+    </div>
+</div>
+
+<!-- Graph -->
+<h6 class="section-header"><i class="bi bi-diagram-3 me-2"></i>Attack Path Graph</h6>
+<div style="position: relative;">
+    <div id="attack-graph-container">
+        <div class="loading-overlay" id="graph-loading">
+            <div class="text-center">
+                <div class="spinner-border text-primary" role="status"></div>
+                <div class="mt-2 text-muted" style="font-size: 0.82rem;">Analyzing attack paths...</div>
+            </div>
+        </div>
+    </div>
+    <div class="graph-legend-ap">
+        <h6>Legend</h6>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff1744;"></div><span class="legend-label">Attacker</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#dc3545;"></div><span class="legend-label">Initial Access</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffc107;"></div><span class="legend-label">Lateral Movement</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#6f42c1;"></div><span class="legend-label">Objective / DA</span></div>
+    </div>
+</div>
+
+<!-- Attack Chains Table -->
+<h6 class="section-header"><i class="bi bi-list-columns-reverse me-2"></i>Attack Chains</h6>
+<div id="chains-container">
+    <div class="no-data-msg" id="chains-empty">
+        <i class="bi bi-shield-check"></i>
+        <p>No attack chains identified. Run scans and enumeration to discover paths.</p>
+    </div>
+    <table class="chain-table" id="chains-table" style="display:none;">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Severity</th>
+                <th>Attack Chain</th>
+                <th>Objective</th>
+            </tr>
+        </thead>
+        <tbody id="chains-tbody"></tbody>
+    </table>
+</div>
+
+<!-- Initial Access Vectors -->
+<h6 class="section-header"><i class="bi bi-door-open me-2"></i>Initial Access Vectors</h6>
+<div id="initial-access-container">
+    <table class="chain-table" id="ia-table" style="display:none;">
+        <thead>
+            <tr>
+                <th>Host</th>
+                <th>Technique</th>
+                <th>MITRE</th>
+                <th>Severity</th>
+                <th>Gains</th>
+            </tr>
+        </thead>
+        <tbody id="ia-tbody"></tbody>
+    </table>
+    <div class="no-data-msg" id="ia-empty">
+        <i class="bi bi-lock"></i>
+        <p>No initial access vectors found.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    let network = null;
+
+    function loadAttackPaths() {
+        fetch('/api/attack-paths')
+            .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
+            .then(data => {
+                renderRiskMeter(data.risk_score, data.summary);
+                renderStats(data);
+                renderGraph(data.graph);
+                renderChains(data.attack_chains);
+                renderInitialAccess(data.initial_access);
+            })
+            .catch(err => {
+                document.getElementById('graph-loading').innerHTML =
+                    '<div class="text-center text-muted"><i class="bi bi-exclamation-triangle" style="font-size:2rem;"></i><div class="mt-2">Failed to load attack path data</div></div>';
+            });
+    }
+
+    function renderRiskMeter(score, summary) {
+        const scoreEl = document.getElementById('risk-score-display');
+        const barEl = document.getElementById('risk-bar-fill');
+        const summaryEl = document.getElementById('risk-summary');
+
+        let riskClass = 'low';
+        if (score >= 75) riskClass = 'critical';
+        else if (score >= 50) riskClass = 'high';
+        else if (score >= 25) riskClass = 'medium';
+
+        scoreEl.textContent = Math.round(score);
+        scoreEl.className = 'risk-score-value ' + riskClass;
+        barEl.className = 'risk-bar-fill ' + riskClass;
+        barEl.style.width = score + '%';
+        summaryEl.textContent = summary;
+    }
+
+    function renderStats(data) {
+        document.getElementById('stat-initial').textContent = data.initial_access.length;
+        document.getElementById('stat-lateral').textContent = data.lateral_movement.length;
+        document.getElementById('stat-privesc').textContent = data.privilege_escalation.length;
+        document.getElementById('stat-chains').textContent = data.attack_chains.length;
+    }
+
+    function renderGraph(graph) {
+        const container = document.getElementById('attack-graph-container');
+
+        if (!graph.nodes || graph.nodes.length === 0) {
+            document.getElementById('graph-loading').innerHTML =
+                '<div class="text-center text-muted"><i class="bi bi-diagram-3" style="font-size:2rem;"></i><div class="mt-2">No attack path graph data available</div></div>';
+            return;
+        }
+
+        const nodeShapes = { 'attacker': 'diamond', 'target': 'dot', 'reachable': 'dot', 'objective': 'star' };
+
+        const nodes = new vis.DataSet(graph.nodes.map(n => ({
+            id: n.id, label: n.label,
+            color: { background: n.color, border: n.color, highlight: { background: n.color, border: '#333' } },
+            size: n.size, shape: nodeShapes[n.type] || 'dot',
+            font: { color: '#33363b', size: 11 },
+            borderWidth: 2,
+            shadow: { enabled: true, color: 'rgba(0,0,0,0.1)', size: 4 },
+            title: n.techniques ? n.label + '\n' + (n.techniques || []).join(', ') : n.label,
+        })));
+
+        const edges = new vis.DataSet(graph.edges.map((e, i) => ({
+            id: i, from: e.from, to: e.to, label: e.label || '',
+            color: { color: e.color, highlight: e.color },
+            dashes: e.dashes || false,
+            arrows: { to: { enabled: true, scaleFactor: 0.8 } },
+            font: { color: '#999da3', size: 9, strokeWidth: 0 },
+            smooth: { type: 'cubicBezier', roundness: 0.4 },
+        })));
+
+        const options = {
+            layout: { hierarchical: { enabled: true, direction: 'UD', sortMethod: 'directed', levelSeparation: 120, nodeSpacing: 150, treeSpacing: 200 } },
+            physics: { enabled: false },
+            interaction: { hover: true, tooltipDelay: 200, dragNodes: true, dragView: true, zoomView: true },
+            nodes: { font: { color: '#33363b', size: 11 }, borderWidth: 2, shadow: { enabled: true, color: 'rgba(0,0,0,0.1)', size: 4 } },
+            edges: { width: 2, arrows: { to: { enabled: true, scaleFactor: 0.8 } }, font: { color: '#999da3', size: 9, strokeWidth: 0 } },
+        };
+
+        if (network) network.destroy();
+        network = new vis.Network(container, { nodes, edges }, options);
+        document.getElementById('graph-loading').style.display = 'none';
+    }
+
+    function renderChains(chains) {
+        const tbody = document.getElementById('chains-tbody');
+        const table = document.getElementById('chains-table');
+        const empty = document.getElementById('chains-empty');
+
+        if (!chains || chains.length === 0) { table.style.display = 'none'; empty.style.display = 'block'; return; }
+
+        table.style.display = 'table'; empty.style.display = 'none'; tbody.innerHTML = '';
+
+        chains.forEach((chain, idx) => {
+            const stepsHtml = chain.steps.map(s => {
+                const host = s.host ? `<span class="text-muted">(${s.host})</span>` : '';
+                return `<span class="mitre-tag">${s.mitre}</span> ${escapeHtml(s.technique.substring(0, 30))} ${host}`;
+            }).join('<span class="step-arrow">→</span>');
+
+            const row = document.createElement('tr');
+            row.innerHTML = `<td>${idx + 1}</td><td><span class="severity-badge ${chain.severity}">${chain.severity}</span></td><td>${stepsHtml}</td><td>${escapeHtml(chain.objective || 'Unknown')}</td>`;
+            tbody.appendChild(row);
+        });
+    }
+
+    function renderInitialAccess(vectors) {
+        const tbody = document.getElementById('ia-tbody');
+        const table = document.getElementById('ia-table');
+        const empty = document.getElementById('ia-empty');
+
+        if (!vectors || vectors.length === 0) { table.style.display = 'none'; empty.style.display = 'block'; return; }
+
+        table.style.display = 'table'; empty.style.display = 'none'; tbody.innerHTML = '';
+
+        vectors.forEach(v => {
+            const row = document.createElement('tr');
+            row.innerHTML = `<td><code>${escapeHtml(v.host_ip)}</code>${v.port ? ':' + v.port : ''}</td><td>${escapeHtml(v.technique)}</td><td><span class="mitre-tag">${escapeHtml(v.mitre)}</span></td><td><span class="severity-badge ${v.severity}">${v.severity}</span></td><td>${escapeHtml(v.gains)}</td>`;
+            tbody.appendChild(row);
+        });
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    loadAttackPaths();
+})();
+</script>
+{% endblock %}

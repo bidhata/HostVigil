@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+
+{% block title %}Network Map{% endblock %}
+{% block page_title %}Network Map{% endblock %}
+
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Network Map</li>
+{% endblock %}
+
+{% block head_extra %}
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+#network-container {
+    width: 100%;
+    height: calc(100vh - 200px);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: #ffffff;
+    position: relative;
+}
+.graph-legend {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 16px;
+    z-index: 10;
+    font-size: 0.78rem;
+    box-shadow: var(--shadow-sm);
+}
+.graph-legend h6 {
+    margin-bottom: 8px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+}
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 5px;
+}
+.legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+.legend-label { color: var(--text-primary); }
+#node-details {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 280px;
+    background: rgba(255, 255, 255, 0.97);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 16px;
+    z-index: 10;
+    display: none;
+    box-shadow: var(--shadow-md);
+}
+#node-details.visible { display: block; }
+#node-details h6 { color: var(--porto-primary); margin-bottom: 12px; font-size: 0.85rem; }
+#node-details .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border-light);
+    font-size: 0.78rem;
+}
+#node-details .detail-row:last-child { border-bottom: none; }
+#node-details .detail-label { color: var(--text-muted); }
+#node-details .detail-value { color: var(--text-primary); font-family: var(--font-mono); }
+#node-details .close-btn {
+    position: absolute; top: 8px; right: 12px;
+    background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.1rem;
+}
+#node-details .close-btn:hover { color: var(--text-primary); }
+.graph-stats {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 8px 14px;
+    z-index: 10;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    box-shadow: var(--shadow-sm);
+}
+.graph-stats span { margin-right: 14px; }
+.graph-stats .stat-val { color: var(--porto-primary); font-weight: 600; }
+.graph-toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+.loading-overlay {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255, 255, 255, 0.85); z-index: 100; border-radius: 8px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="graph-toolbar">
+    <button class="btn btn-sm btn-outline-secondary" id="btn-fit" title="Fit to view">
+        <i class="bi bi-arrows-fullscreen"></i> Fit
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" id="btn-physics" title="Toggle physics">
+        <i class="bi bi-stars"></i> Physics
+    </button>
+    <button class="btn btn-sm btn-outline-secondary" id="btn-refresh" title="Refresh data">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+</div>
+
+<div style="position: relative;">
+    <div id="network-container">
+        <div class="loading-overlay" id="loading-overlay">
+            <div class="text-center">
+                <div class="spinner-border text-primary" role="status"></div>
+                <div class="mt-2 text-muted" style="font-size: 0.82rem;">Loading network graph...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="graph-legend">
+        <h6>Risk Level</h6>
+        <div class="legend-item"><div class="legend-dot" style="background:#dc3545;"></div><span class="legend-label">Critical</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff6d00;"></div><span class="legend-label">High</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffc107;"></div><span class="legend-label">Medium</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:#28a745;"></div><span class="legend-label">Clean / Low</span></div>
+        <h6 class="mt-3">Size</h6>
+        <div class="legend-item"><span class="legend-label">Node size = open ports</span></div>
+    </div>
+
+    <div id="node-details">
+        <button class="close-btn" id="close-details">&times;</button>
+        <h6 id="detail-title">Host Details</h6>
+        <div class="detail-row"><span class="detail-label">IP Address</span><span class="detail-value" id="detail-ip">-</span></div>
+        <div class="detail-row"><span class="detail-label">Hostname</span><span class="detail-value" id="detail-hostname">-</span></div>
+        <div class="detail-row"><span class="detail-label">Subnet</span><span class="detail-value" id="detail-subnet">-</span></div>
+        <div class="detail-row"><span class="detail-label">Open Ports</span><span class="detail-value" id="detail-ports">-</span></div>
+        <div class="detail-row"><span class="detail-label">Vulnerabilities</span><span class="detail-value" id="detail-vulns">-</span></div>
+        <div class="detail-row"><span class="detail-label">OS</span><span class="detail-value" id="detail-os">-</span></div>
+    </div>
+
+    <div class="graph-stats">
+        <span>Nodes: <span class="stat-val" id="stat-nodes">0</span></span>
+        <span>Edges: <span class="stat-val" id="stat-edges">0</span></span>
+        <span>Subnets: <span class="stat-val" id="stat-subnets">0</span></span>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    let network = null;
+    let physicsEnabled = true;
+
+    const options = {
+        nodes: {
+            shape: 'dot',
+            font: { color: '#33363b', size: 11 },
+            borderWidth: 2,
+            shadow: { enabled: true, color: 'rgba(0,0,0,0.1)', size: 4 }
+        },
+        edges: { width: 1, color: { color: '#dee2e6' }, smooth: { type: 'continuous', roundness: 0.3 } },
+        physics: {
+            enabled: true,
+            solver: 'forceAtlas2Based',
+            forceAtlas2Based: { gravitationalConstant: -40, centralGravity: 0.005, springLength: 120, springConstant: 0.04, damping: 0.4 },
+            stabilization: { enabled: true, iterations: 200, updateInterval: 25 }
+        },
+        interaction: { hover: true, tooltipDelay: 200, dragNodes: true, dragView: true, zoomView: true }
+    };
+
+    function loadGraphData() {
+        document.getElementById('loading-overlay').style.display = 'flex';
+        fetch('/api/graph/data')
+            .then(r => { if (!r.ok) throw new Error('Failed'); return r.json(); })
+            .then(data => {
+                renderGraph(data);
+                document.getElementById('stat-nodes').textContent = data.nodes.length;
+                document.getElementById('stat-edges').textContent = data.edges.length;
+                document.getElementById('stat-subnets').textContent = data.subnets.length;
+                document.getElementById('loading-overlay').style.display = 'none';
+            })
+            .catch(err => {
+                document.getElementById('loading-overlay').innerHTML =
+                    '<div class="text-center text-muted"><i class="bi bi-exclamation-triangle" style="font-size:2rem;"></i><div class="mt-2">Failed to load graph data</div></div>';
+            });
+    }
+
+    function renderGraph(data) {
+        const container = document.getElementById('network-container');
+        const nodes = new vis.DataSet(data.nodes.map(n => ({
+            id: n.id, label: n.label, title: n.title,
+            color: { background: n.color, border: n.color, highlight: { background: n.color, border: '#333' }, hover: { background: n.color, border: '#333' } },
+            size: n.size, _data: n
+        })));
+        const edges = new vis.DataSet(data.edges.map(e => ({ id: e.id, from: e.from, to: e.to, color: e.color })));
+
+        if (network) network.destroy();
+        network = new vis.Network(container, { nodes, edges }, options);
+
+        network.on('click', function(params) {
+            if (params.nodes.length > 0) {
+                const nd = data.nodes.find(n => n.id === params.nodes[0]);
+                if (nd) showDetails(nd);
+            } else { hideDetails(); }
+        });
+        network.on('stabilizationIterationsDone', () => network.setOptions({ physics: { stabilization: { enabled: false } } }));
+    }
+
+    function showDetails(node) {
+        document.getElementById('detail-title').textContent = node.label;
+        document.getElementById('detail-ip').textContent = node.ip || '-';
+        document.getElementById('detail-hostname').textContent = (node.label !== node.ip) ? node.label : '-';
+        document.getElementById('detail-subnet').textContent = node.subnet || '-';
+        document.getElementById('detail-ports').textContent = node.port_count || '0';
+        document.getElementById('detail-vulns').textContent = node.vuln_count || '0';
+        const osLine = (node.title || '').split('\n').find(l => l.startsWith('OS:'));
+        document.getElementById('detail-os').textContent = osLine ? osLine.replace('OS: ', '') : 'unknown';
+        document.getElementById('node-details').classList.add('visible');
+    }
+
+    function hideDetails() { document.getElementById('node-details').classList.remove('visible'); }
+
+    document.getElementById('close-details').addEventListener('click', hideDetails);
+    document.getElementById('btn-fit').addEventListener('click', () => { if (network) network.fit({ animation: true }); });
+    document.getElementById('btn-physics').addEventListener('click', function() {
+        physicsEnabled = !physicsEnabled;
+        if (network) network.setOptions({ physics: { enabled: physicsEnabled } });
+    });
+    document.getElementById('btn-refresh').addEventListener('click', loadGraphData);
+
+    loadGraphData();
+})();
+</script>
+{% endblock %}

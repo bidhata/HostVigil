@@ -1,0 +1,437 @@
+{% extends "base.html" %}
+
+{% block title %}Scan Controls{% endblock %}
+{% block page_title %}Scan Controls{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Scan Controls</li>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+    .pipeline-progress {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        padding: 16px 20px;
+        background: var(--card-bg, #fff);
+        border: 1px solid var(--border-color, #e9ecef);
+        border-radius: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+    .pp-step {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        background: rgba(0,0,0,0.03);
+        white-space: nowrap;
+    }
+    .pp-step.done { color: #28a745; background: rgba(40,167,69,0.1); }
+    .pp-step.running { color: #0088cc; background: rgba(0,136,204,0.1); }
+    .pp-step.pending { color: #999; }
+    .pp-arrow { color: #ccc; margin: 0 6px; font-size: 0.7rem; }
+    .pp-step .spinner-border { width: 12px; height: 12px; border-width: 2px; }
+
+    .scan-btn-stateful {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 16px 18px;
+        border-radius: 10px;
+        border: 1px solid var(--border-color, #e9ecef);
+        background: var(--card-bg, #fff);
+        cursor: pointer;
+        transition: all 0.15s;
+        width: 100%;
+        text-align: left;
+    }
+    .scan-btn-stateful:hover { border-color: #0088cc; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .scan-btn-stateful:disabled { opacity: 0.5; cursor: not-allowed; }
+    .scan-btn-stateful:disabled:hover { border-color: var(--border-color, #e9ecef); box-shadow: none; }
+    .scan-btn-stateful .btn-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        margin-bottom: 4px;
+    }
+    .scan-btn-stateful .btn-label { font-weight: 600; font-size: 0.9rem; }
+    .scan-btn-stateful .btn-desc { font-size: 0.75rem; opacity: 0.6; }
+    .scan-btn-stateful .btn-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 6px;
+        font-size: 0.72rem;
+    }
+    .status-dot-idle { width: 8px; height: 8px; border-radius: 50%; background: #adb5bd; }
+    .status-dot-running { width: 8px; height: 8px; border-radius: 50%; background: #0088cc; animation: pulse-dot 1s infinite; }
+    .status-dot-done { width: 8px; height: 8px; border-radius: 50%; background: #28a745; }
+    @keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .live-log-card {
+        background: #1a1d23;
+        border-radius: 10px;
+        padding: 14px 18px;
+        max-height: 320px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 0.75rem;
+        line-height: 1.6;
+        color: #c8ccd0;
+    }
+    .live-log-card .log-line { padding: 1px 0; }
+    .live-log-card .log-line.log-error { color: #f87171; }
+    .live-log-card .log-line.log-success { color: #4ade80; }
+    .live-log-card .log-line.log-warn { color: #fbbf24; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="scan-controls-page">
+
+    <!-- Pipeline Progress -->
+    <div class="pipeline-progress" id="pipelineProgress">
+        <div class="pp-step pending" data-step="discovery">
+            <span class="step-icon">&#9675;</span> Discovery
+        </div>
+        <span class="pp-arrow">&rarr;</span>
+        <div class="pp-step pending" data-step="tcp_scan">
+            <span class="step-icon">&#9675;</span> TCP Scan
+        </div>
+        <span class="pp-arrow">&rarr;</span>
+        <div class="pp-step pending" data-step="service_enum">
+            <span class="step-icon">&#9675;</span> Service Enum
+        </div>
+        <span class="pp-arrow">&rarr;</span>
+        <div class="pp-step pending" data-step="tls">
+            <span class="step-icon">&#9675;</span> TLS
+        </div>
+        <span class="pp-arrow">&rarr;</span>
+        <div class="pp-step pending" data-step="os_fingerprint">
+            <span class="step-icon">&#9675;</span> OS
+        </div>
+        <span class="pp-arrow">&rarr;</span>
+        <div class="pp-step pending" data-step="ml_analysis">
+            <span class="step-icon">&#9675;</span> ML
+        </div>
+        <span class="pp-arrow">&rarr;</span>
+        <div class="pp-step pending" data-step="nuclei">
+            <span class="step-icon">&#9675;</span> Nuclei
+        </div>
+    </div>
+
+    <!-- Scan Buttons Grid -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-lightning me-2"></i>Scan Actions</h3>
+        <p class="section-desc">Trigger scans with stealth timing. Buttons show live status and target counts.</p>
+
+        <div class="row g-3">
+            <div class="col-lg-4 col-md-6">
+                <button class="scan-btn-stateful" id="btn-full" onclick="triggerScan('full')">
+                    <div class="btn-header">
+                        <span class="status-dot-idle" data-status-dot></span>
+                        <span class="btn-label">Full Pipeline</span>
+                    </div>
+                    <div class="btn-desc">Discovery &rarr; Scan &rarr; Enum &rarr; ML &rarr; Nuclei</div>
+                    <div class="btn-meta">
+                        <span class="badge bg-secondary bg-opacity-25 text-secondary" data-target-count>—</span>
+                    </div>
+                </button>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <button class="scan-btn-stateful" id="btn-discover" onclick="triggerScan('discover')">
+                    <div class="btn-header">
+                        <span class="status-dot-idle" data-status-dot></span>
+                        <span class="btn-label">Host Discovery</span>
+                    </div>
+                    <div class="btn-desc">Nmap, ARP, mDNS, SNMP, passive sniff</div>
+                    <div class="btn-meta">
+                        <span class="badge bg-secondary bg-opacity-25 text-secondary" data-target-count>—</span>
+                    </div>
+                </button>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <button class="scan-btn-stateful" id="btn-scan" onclick="triggerScan('scan')">
+                    <div class="btn-header">
+                        <span class="status-dot-idle" data-status-dot></span>
+                        <span class="btn-label">TCP Port Scan</span>
+                    </div>
+                    <div class="btn-desc">Stealth TCP connect/SYN scan</div>
+                    <div class="btn-meta">
+                        <span class="badge bg-secondary bg-opacity-25 text-secondary" data-target-count>—</span>
+                    </div>
+                </button>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <button class="scan-btn-stateful" id="btn-udpscan" onclick="triggerScan('udpscan')">
+                    <div class="btn-header">
+                        <span class="status-dot-idle" data-status-dot></span>
+                        <span class="btn-label">UDP Port Scan</span>
+                    </div>
+                    <div class="btn-desc">DNS, SNMP, NTP, SSDP probes</div>
+                    <div class="btn-meta">
+                        <span class="badge bg-secondary bg-opacity-25 text-secondary" data-target-count>—</span>
+                    </div>
+                </button>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <button class="scan-btn-stateful" id="btn-fingerprint" onclick="triggerScan('fingerprint')">
+                    <div class="btn-header">
+                        <span class="status-dot-idle" data-status-dot></span>
+                        <span class="btn-label">OS Fingerprint</span>
+                    </div>
+                    <div class="btn-desc">Identify operating systems</div>
+                    <div class="btn-meta">
+                        <span class="badge bg-secondary bg-opacity-25 text-secondary" data-target-count>—</span>
+                    </div>
+                </button>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <button class="scan-btn-stateful" id="btn-tls" onclick="triggerScan('tls')">
+                    <div class="btn-header">
+                        <span class="status-dot-idle" data-status-dot></span>
+                        <span class="btn-label">TLS Inspection</span>
+                    </div>
+                    <div class="btn-desc">Certificates &amp; weak ciphers</div>
+                    <div class="btn-meta">
+                        <span class="badge bg-secondary bg-opacity-25 text-secondary" data-target-count>—</span>
+                    </div>
+                </button>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <button class="scan-btn-stateful" id="btn-enumerate" onclick="triggerScan('enumerate')">
+                    <div class="btn-header">
+                        <span class="status-dot-idle" data-status-dot></span>
+                        <span class="btn-label">Service Enumeration</span>
+                    </div>
+                    <div class="btn-desc">SMB, LDAP, Redis, Docker, ES</div>
+                    <div class="btn-meta">
+                        <span class="badge bg-secondary bg-opacity-25 text-secondary" data-target-count>—</span>
+                    </div>
+                </button>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <button class="scan-btn-stateful" id="btn-analyze" onclick="triggerScan('analyze')">
+                    <div class="btn-header">
+                        <span class="status-dot-idle" data-status-dot></span>
+                        <span class="btn-label">ML Analysis</span>
+                    </div>
+                    <div class="btn-desc">Anomaly detection on findings</div>
+                    <div class="btn-meta">
+                        <span class="badge bg-secondary bg-opacity-25 text-secondary" data-target-count>—</span>
+                    </div>
+                </button>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <button class="scan-btn-stateful" id="btn-nuclei" onclick="triggerScan('nuclei')">
+                    <div class="btn-header">
+                        <span class="status-dot-idle" data-status-dot></span>
+                        <span class="btn-label">Nuclei Vuln Scan</span>
+                    </div>
+                    <div class="btn-desc">Exploit detection &amp; validation</div>
+                    <div class="btn-meta">
+                        <span class="badge bg-secondary bg-opacity-25 text-secondary" data-target-count>—</span>
+                    </div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DNS Discovery Section (unchanged) -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-globe me-2"></i>Custom DNS Host Discovery</h3>
+        <p class="section-desc">Use your local/internal DNS server to discover hosts via reverse lookups or zone transfers.</p>
+
+        <form id="dnsDiscoveryForm" class="dns-form" onsubmit="triggerDnsDiscovery(event)">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="dnsServer">DNS Server IP <span class="required">*</span></label>
+                    <input type="text" id="dnsServer" name="dns_server" placeholder="e.g. 10.0.0.1 or 192.168.1.1" required>
+                    <span class="form-hint">Internal DNS/AD DC IP address</span>
+                </div>
+                <div class="form-group">
+                    <label for="targetRange">Target Range (CIDR)</label>
+                    <input type="text" id="targetRange" name="target_range" placeholder="e.g. 10.120.0.0/16">
+                    <span class="form-hint">IP range for reverse DNS lookups</span>
+                </div>
+                <div class="form-group">
+                    <label for="domain">Domain Name</label>
+                    <input type="text" id="domain" name="domain" placeholder="e.g. corp.internal or ad.company.local">
+                    <span class="form-hint">Attempt zone transfer (AXFR) on this domain</span>
+                </div>
+            </div>
+            <button type="submit" class="scan-btn scan-btn-green" style="margin-top: 14px;">
+                <span class="scan-btn-icon">&#127760;</span>
+                <span class="scan-btn-label">Start DNS Discovery</span>
+                <span class="scan-btn-desc">Reverse lookups + zone transfer attempt</span>
+            </button>
+        </form>
+    </div>
+
+    <!-- Live Scan Log -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-terminal me-2"></i>Live Scan Log</h3>
+        <div class="live-log-card" id="liveLogContainer">
+            <div class="log-line">Waiting for scan activity...</div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+    var statusPollInterval = null;
+    var logLines = [];
+
+    function triggerScan(scanType) {
+        var btn = document.getElementById('btn-' + scanType);
+        if (btn) {
+            btn.disabled = true;
+            var dot = btn.querySelector('[data-status-dot]');
+            if (dot) { dot.className = 'status-dot-running'; }
+        }
+
+        fetch('/api/scan/trigger', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({scan_type: scanType})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                appendLog('error', data.error);
+                if (btn) { btn.disabled = false; var d = btn.querySelector('[data-status-dot]'); if(d) d.className = 'status-dot-idle'; }
+            } else {
+                appendLog('success', scanType + ' scan triggered: ' + data.message);
+                startStatusPolling();
+            }
+        })
+        .catch(function(err) {
+            appendLog('error', 'Failed to trigger scan: ' + err.message);
+            if (btn) { btn.disabled = false; var d = btn.querySelector('[data-status-dot]'); if(d) d.className = 'status-dot-idle'; }
+        });
+    }
+
+    function triggerDnsDiscovery(event) {
+        event.preventDefault();
+        var dnsServer = document.getElementById('dnsServer').value.trim();
+        var targetRange = document.getElementById('targetRange').value.trim();
+        var domain = document.getElementById('domain').value.trim();
+        if (!dnsServer) { appendLog('error', 'DNS Server IP is required'); return; }
+
+        fetch('/api/discover/dns', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ dns_server: dnsServer, target_range: targetRange, domain: domain })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) { appendLog('error', data.error); }
+            else {
+                appendLog('success', 'DNS discovery started using ' + dnsServer);
+                startStatusPolling();
+            }
+        })
+        .catch(function(err) { appendLog('error', 'Failed: ' + err.message); });
+    }
+
+    function startStatusPolling() {
+        if (statusPollInterval) return;
+        statusPollInterval = setInterval(pollProgress, 3000);
+    }
+
+    function pollProgress() {
+        fetch('/api/scan/progress')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            // Update pipeline steps
+            if (data.pipeline_steps) {
+                var steps = document.querySelectorAll('#pipelineProgress .pp-step');
+                var stepsMap = { discovery: 0, tcp_scan: 1, service_enum: 2, tls: 3, os_fingerprint: 4, ml_analysis: 5, nuclei: 6 };
+                data.pipeline_steps.forEach(function(step) {
+                    var idx = stepsMap[step.name];
+                    if (idx !== undefined && steps[idx]) {
+                        var el = steps[idx];
+                        var icon = el.querySelector('.step-icon');
+                        el.classList.remove('done', 'running', 'pending');
+                        if (step.status === 'done') { el.classList.add('done'); icon.innerHTML = '&#10003;'; }
+                        else if (step.status === 'running') { el.classList.add('running'); icon.innerHTML = '&#9203;'; }
+                        else { el.classList.add('pending'); icon.innerHTML = '&#9675;'; }
+                    }
+                });
+            }
+
+            // Update button states
+            if (data.buttons) {
+                data.buttons.forEach(function(b) {
+                    var btn = document.getElementById('btn-' + b.type);
+                    if (!btn) return;
+                    var dot = btn.querySelector('[data-status-dot]');
+                    var countEl = btn.querySelector('[data-target-count]');
+                    if (b.status === 'running') {
+                        dot.className = 'status-dot-running';
+                        btn.disabled = true;
+                    } else if (b.status === 'done') {
+                        dot.className = 'status-dot-done';
+                        btn.disabled = false;
+                    } else {
+                        dot.className = 'status-dot-idle';
+                        btn.disabled = false;
+                    }
+                    if (b.target_count !== undefined && countEl) {
+                        countEl.textContent = b.target_count.toLocaleString() + ' hosts';
+                    }
+                });
+            }
+
+            // Update log lines
+            if (data.log_lines && data.log_lines.length > 0) {
+                data.log_lines.forEach(function(line) {
+                    appendLog(line.level || 'info', line.message);
+                });
+            }
+
+            // Stop polling if nothing running
+            if (!data.running) {
+                clearInterval(statusPollInterval);
+                statusPollInterval = null;
+                // Reset all buttons
+                document.querySelectorAll('.scan-btn-stateful').forEach(function(btn) {
+                    btn.disabled = false;
+                });
+            }
+        })
+        .catch(function() {});
+    }
+
+    function appendLog(level, message) {
+        var container = document.getElementById('liveLogContainer');
+        var firstLine = container.querySelector('.log-line');
+        if (firstLine && firstLine.textContent === 'Waiting for scan activity...') {
+            firstLine.remove();
+        }
+        var ts = new Date().toLocaleTimeString();
+        var div = document.createElement('div');
+        div.className = 'log-line log-' + level;
+        div.textContent = '[' + ts + '] ' + message;
+        container.appendChild(div);
+        // Keep max 20 lines
+        while (container.children.length > 20) {
+            container.removeChild(container.firstChild);
+        }
+        container.scrollTop = container.scrollHeight;
+    }
+
+    // Initial poll
+    pollProgress();
+    startStatusPolling();
+</script>
+{% endblock %}

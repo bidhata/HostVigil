@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  hostvigil:
+    build: .
+    container_name: hostvigil
+    network_mode: host          # Required for network scanning
+    cap_add:
+      - NET_RAW                 # Required for raw packets (ARP, SYN scan)
+      - NET_ADMIN               # Required for packet capture
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+      - ./plugins:/app/plugins:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    command: daemon
+
+  # Run dashboard only (no scanning)
+  # hostvigil-dashboard:
+  #   build: .
+  #   container_name: hostvigil-dashboard
+  #   ports:
+  #     - "5000:5000"
+  #   volumes:
+  #     - ./config.yaml:/app/config.yaml:ro
+  #     - ./data:/app/data:ro
+  #   command: dashboard

@@ -1,0 +1,157 @@
+hostvigil:
+  stealth:
+    min_delay: 10.0
+    max_delay: 45.0
+    max_threads: 3
+    jitter_factor: 0.3
+    packet_fragmentation: true
+    randomize_scan_order: true
+    ttl_manipulation: true
+    decoy_ips: ['10.0.0.1', '10.0.0.254', '172.16.0.1', '192.168.1.1', '100.64.0.1', '198.18.0.1']
+    # Adaptive throttle: back off if too many RSTs detected
+    rst_threshold: 3
+    rst_window_seconds: 60
+    rst_backoff_multiplier: 3.0
+    # Scan window: only scan during these hours (blends with business traffic)
+    scan_window_enabled: false
+    scan_window_start: 8    # 8 AM
+    scan_window_end: 18     # 6 PM
+
+  discovery:
+    techniques:
+      # === Fast / High-value (results in seconds-minutes) ===
+      - nmap_discover      # First: nmap -sn, finds live hosts via ARP/ICMP/TCP
+      # - arp_sweep        # Disabled by default: redundant with nmap -sn, extremely slow on large subnets (days on /16).
+                           # Enable only for small LANs (/24) where ARP is more reliable than ICMP.
+      - nbns_query         # Quick NetBIOS name lookups (Windows hosts)
+      - mdns_enum          # Fast multicast .local queries (printers, IoT, macOS)
+      - ssdp_discover      # UPnP multicast (routers, NAS, media devices)
+      - tcp_syn_discover   # Lightweight alive check on common ports
+      # === Medium speed ===
+      - snmp_sweep         # Hits managed switches/routers (45s delays, but targeted)
+      # === Slow / Passive (background enrichment) ===
+      - dns_reverse_walk   # PTR lookups across ranges — very slow on /8
+      - passive_sniff      # Zero-packet listen (5 min sit-and-wait)
+      - dhcp_passive       # DHCP traffic capture (2 min wait)
+      # - ipv6_neighbor    # Enable if IPv6 is present on network
+      # - dns_custom       # PTR lookups via internal DNS server (set dns_custom_server first)
+    target_ranges:
+      - '10.0.0.0/8'
+      - '100.64.0.0/10'
+      # - '169.254.0.0/16'  # Link-local: excluded (unreliable, causes noise)
+      - '172.16.0.0/12'
+      - '192.0.0.0/24'
+      - '192.168.0.0/16'
+      - '198.18.0.0/15'
+      - 'fe80::/10'
+      - 'fc00::/7'
+    passive_sniff_duration: 300
+    dhcp_sniff_duration: 120
+    arp_batch_size: 16
+    arp_batch_delay: 5.0
+    snmp_communities: ['public', 'private']
+    snmp_delay: 45.0       # Extra slow for SNMP (often monitored)
+    # nmap host-discovery options (technique: nmap_discover)
+    nmap_timing: 'T4'          # T2=polite/stealth, T4=fast/noisy
+    nmap_host_timeout: ''      # e.g. '30s'; leave empty on nmap 7.80/Windows (triggers a crash bug)
+    nmap_scan_timeout: 3600    # hard cap (seconds) per target range subprocess (1hr for /8)
+    nmap_min_prefix: 8         # allow broad ranges like /8, /10, /12 to be scanned
+    nmap_extra_args: ['-PE', '-PS22,80,135,139,443,445,3389,5985', '-PU137', '--min-rate', '5000', '--max-retries', '1', '-n']
+    # NOTE: --min-rate 5000 = fast/noisy. For stealth use 100
+    nmap_disable_arp_ping: false  # false = use ARP on Linux (best); auto-retries with --disable-arp-ping if nmap crashes on Windows
+    nmap_parallel_chunks: 4       # Parallel nmap processes (1=stealth, 4+=fast but noisy)
+    # Custom DNS discovery (technique: dns_custom)
+    dns_custom_server: ''       # Internal DNS server IP (e.g. '10.0.0.1'); empty = disabled
+    dns_custom_domain: ''       # Domain for zone transfer attempts (e.g. 'corp.local')
+    dns_custom_timeout: 3.0     # Seconds per DNS query
+
+  scanner:
+    # TCP port profiles
+    ports:
+      quick: [22, 80, 443, 445, 3389]
+      standard: [22, 53, 80, 88, 135, 139, 389, 443, 445, 636, 1433, 3306, 3389, 5432, 5985, 5986, 8080, 8443, 9200]
+      full: [21, 22, 23, 25, 53, 80, 88, 110, 111, 135, 139, 143, 389, 443, 445, 465, 514, 587, 636, 993, 995, 1080, 1433, 1521, 2049, 2375, 2376, 3306, 3389, 5432, 5900, 5985, 5986, 6379, 8080, 8443, 8888, 9090, 9200, 9300, 11211, 27017]
+      # top1000 and top10000 are built-in to the scanner module
+    # UDP port profiles
+    udp_ports:
+      quick: [53, 123, 161, 500, 1900]
+      standard: [53, 67, 68, 69, 123, 137, 138, 161, 162, 500, 514, 520, 1194, 1900, 4500, 5353]
+      full: [53, 67, 68, 69, 111, 123, 137, 138, 161, 162, 500, 514, 520, 623, 1194, 1434, 1604, 1900, 2049, 4500, 5060, 5353, 5632, 11211, 27960]
+    scan_type: 'connect'       # 'connect' or 'syn' (syn requires root)
+    udp_scan_enabled: true     # Enable UDP scanning
+    udp_profile: 'standard'    # Which UDP profile to use
+    port_profile: 'standard'   # Which TCP profile to use
+    timeout: 1.5
+    banner_grab: true
+    service_detection: true
+
+  # OS Fingerprinting
+  os_fingerprint:
+    enabled: true
+    active_probing: true       # Set false for passive-only (stealthier)
+    confidence_threshold: 0.4  # Minimum confidence to store a result
+
+  # SSL/TLS Inspection
+  tls_inspection:
+    enabled: true
+    ports: [443, 636, 993, 995, 465, 8443, 5986, 2376, 9443]
+    check_expiry: true
+    check_weak_ciphers: true
+    check_protocol_versions: true
+    timeout: 5.0
+
+  # Service Enumeration (deep inspection)
+  service_enum:
+    enabled: true
+    smb_enum: true             # SMB null session, shares, signing
+    ldap_enum: true            # LDAP anonymous bind, root DSE
+    redis_check: true          # Redis no-auth check
+    elasticsearch_check: true  # Elasticsearch open access
+    docker_check: true         # Docker API exposure
+    winrm_check: true          # WinRM accessibility
+    timeout: 5.0
+
+  ml_engine:
+    model_path: 'data/models/'
+    training_interval_hours: 24
+    anomaly_threshold: 0.7
+    min_training_samples: 50
+    features:
+      - port_count_per_host
+      - new_service_detection
+      - port_change_rate
+      - unusual_port_combinations
+      - banner_change_detection
+      - time_pattern_deviation
+      - os_change_detection
+      - tls_weakness_score
+
+  nuclei:
+    binary_path: 'nuclei'
+    templates_path: ''
+    severity_filter: ['critical', 'high', 'medium']
+    rate_limit: 10
+    bulk_size: 5
+    concurrency: 2
+    timeout: 15
+    retries: 1
+    auto_run: true
+    run_interval_hours: 6
+
+  dashboard:
+    host: '127.0.0.1'       # '127.0.0.1' = local only (stealth). Use '0.0.0.0' for all interfaces.
+    port: 5000
+    secret_key: 'change-this-in-production'
+    refresh_interval: 30
+
+  scheduler:
+    discovery_interval_hours: 4
+    scan_interval_hours: 2
+    ml_training_interval_hours: 24
+    nuclei_interval_hours: 6
+    os_fingerprint_interval_hours: 12
+    tls_inspection_interval_hours: 12
+    service_enum_interval_hours: 8
+
+  database:
+    path: 'data/hostvigil.db'

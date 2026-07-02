@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}MITRE ATT&CK{% endblock %}
+{% block page_title %}MITRE ATT&CK Coverage{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">MITRE Heatmap</li>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+.mitre-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+    margin-top: 16px;
+}
+.tactic-column {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    overflow: hidden;
+}
+.tactic-header {
+    padding: 10px 12px;
+    background: #fafbfc;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-primary);
+    text-align: center;
+}
+[data-theme="dark"] .tactic-header { background: rgba(0,0,0,0.2); }
+.technique-item {
+    padding: 6px 10px;
+    font-size: 0.68rem;
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s;
+}
+.technique-item:last-child { border-bottom: none; }
+.technique-item:hover { background: #f8f9fa; }
+[data-theme="dark"] .technique-item:hover { background: rgba(255,255,255,0.03); }
+.technique-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.technique-dot.covered { background: var(--porto-danger); }
+.technique-dot.partial { background: #e6a000; }
+.technique-dot.none { background: var(--border-color); }
+.technique-id {
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    font-size: 0.6rem;
+}
+.technique-name {
+    flex: 1;
+    color: var(--text-primary);
+}
+.coverage-stats {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+.coverage-stat {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 14px 20px;
+    text-align: center;
+}
+.coverage-stat .stat-num {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--porto-primary);
+}
+.coverage-stat .stat-label {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="coverage-stats" id="coverageStats">
+    <div class="coverage-stat">
+        <div class="stat-num" id="stat-techniques">0</div>
+        <div class="stat-label">Techniques Covered</div>
+    </div>
+    <div class="coverage-stat">
+        <div class="stat-num" id="stat-tactics">0</div>
+        <div class="stat-label">Tactics Tested</div>
+    </div>
+    <div class="coverage-stat">
+        <div class="stat-num" id="stat-evidence">0</div>
+        <div class="stat-label">Evidence Items</div>
+    </div>
+</div>
+
+<div class="mitre-grid" id="mitreGrid">
+    <div class="empty-state" style="grid-column: 1/-1;">
+        <div class="empty-icon">🛡️</div>
+        <h3>Loading MITRE ATT&CK Coverage...</h3>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const TACTICS = [
+        'reconnaissance', 'resource-development', 'initial-access', 'execution',
+        'persistence', 'privilege-escalation', 'defense-evasion', 'credential-access',
+        'discovery', 'lateral-movement', 'collection', 'exfiltration', 'command-and-control', 'impact'
+    ];
+
+    const TACTIC_NAMES = {
+        'reconnaissance': 'Recon', 'resource-development': 'Resource Dev',
+        'initial-access': 'Initial Access', 'execution': 'Execution',
+        'persistence': 'Persistence', 'privilege-escalation': 'Priv Esc',
+        'defense-evasion': 'Defense Evasion', 'credential-access': 'Cred Access',
+        'discovery': 'Discovery', 'lateral-movement': 'Lateral Mvmt',
+        'collection': 'Collection', 'exfiltration': 'Exfiltration',
+        'command-and-control': 'C2', 'impact': 'Impact'
+    };
+
+    fetch('/api/mitre/coverage')
+        .then(r => r.json())
+        .then(data => {
+            const grid = document.getElementById('mitreGrid');
+            grid.innerHTML = '';
+
+            const byTactic = {};
+            TACTICS.forEach(t => byTactic[t] = []);
+            data.forEach(item => {
+                const t = item.tactic || 'discovery';
+                if (byTactic[t]) byTactic[t].push(item);
+            });
+
+            const tacticsUsed = new Set(data.map(d => d.tactic));
+            document.getElementById('stat-techniques').textContent = data.length;
+            document.getElementById('stat-tactics').textContent = tacticsUsed.size;
+            document.getElementById('stat-evidence').textContent = data.reduce((s, d) => s + (d.evidence_count || 0), 0);
+
+            TACTICS.forEach(tactic => {
+                const col = document.createElement('div');
+                col.className = 'tactic-column';
+                col.innerHTML = `<div class="tactic-header">${TACTIC_NAMES[tactic] || tactic}</div>`;
+                
+                const items = byTactic[tactic];
+                if (items.length === 0) {
+                    col.innerHTML += '<div class="technique-item"><span class="technique-name" style="color:var(--text-muted);">No coverage</span></div>';
+                } else {
+                    items.forEach(item => {
+                        const conf = item.max_confidence || 0;
+                        const dotClass = conf >= 0.7 ? 'covered' : conf >= 0.4 ? 'partial' : 'none';
+                        col.innerHTML += `
+                            <div class="technique-item">
+                                <span class="technique-dot ${dotClass}"></span>
+                                <span class="technique-id">${item.technique_id}</span>
+                                <span class="technique-name">${item.technique_name}</span>
+                            </div>`;
+                    });
+                }
+                grid.appendChild(col);
+            });
+        })
+        .catch(() => {
+            document.getElementById('mitreGrid').innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="empty-icon">🛡️</div><h3>No MITRE data available</h3><p>Run scans to generate ATT&CK coverage mapping.</p></div>';
+        });
+})();
+</script>
+{% endblock %}

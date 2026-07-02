@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Anomalies{% endblock %}
+{% block page_title %}ML Anomaly Detection{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Anomalies</li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="filter-bar">
+        <a href="{{ url_for('anomalies', show_reviewed='0') }}" class="btn btn-filter {% if not show_reviewed %}active{% endif %}">Active Only</a>
+        <a href="{{ url_for('anomalies', show_reviewed='1') }}" class="btn btn-filter {% if show_reviewed %}active{% endif %}">Show All</a>
+    </div>
+    <div class="header-stats">
+        <span class="badge badge-pill badge-warning">{{ anomalies|length }} anomalies</span>
+    </div>
+</div>
+
+{% if anomalies %}
+<div class="cards-grid">
+    {% for anomaly in anomalies %}
+    <div class="anomaly-card {% if anomaly.score >= 0.9 %}anomaly-critical{% elif anomaly.score >= 0.7 %}anomaly-high{% else %}anomaly-medium{% endif %}">
+        <div class="anomaly-header">
+            <span class="anomaly-type">{{ anomaly.anomaly_type }}</span>
+            <span class="anomaly-score">
+                <span class="score-value">{{ "%.2f"|format(anomaly.score) }}</span>
+                <span class="score-label">score</span>
+            </span>
+        </div>
+        <div class="anomaly-body">
+            <div class="anomaly-target">
+                <span class="mono highlight">{{ anomaly.ip }}</span>
+                {% if anomaly.hostname %}
+                <span class="dim">({{ anomaly.hostname }})</span>
+                {% endif %}
+            </div>
+            {% if anomaly.description %}
+            <p class="anomaly-desc">{{ anomaly.description }}</p>
+            {% endif %}
+        </div>
+        <div class="anomaly-footer">
+            <span class="mono dim">{{ anomaly.detected_at[:19] if anomaly.detected_at else '' }}</span>
+            {% if anomaly.is_reviewed %}
+            <span class="badge badge-ghost">Reviewed</span>
+            {% else %}
+            <span class="badge badge-warning">Pending Review</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">🤖</div>
+    <h3>No Anomalies Detected</h3>
+    <p>The ML engine has not flagged any unusual activity{% if not show_reviewed %} (unreviewed){% endif %}.</p>
+</div>
+{% endif %}
+{% endblock %}

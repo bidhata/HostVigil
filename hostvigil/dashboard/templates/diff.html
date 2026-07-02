@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Network Diff{% endblock %}
+{% block page_title %}Network Changes (Last {{ hours }}h){% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Diff View</li>
+{% endblock %}
+
+{% block content %}
+<div class="diff-page">
+
+    <!-- Time Window Selector -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-clock-history me-2"></i>Time Window</h3>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('diff_view', hours=6) }}" class="btn btn-filter {% if hours == 6 %}active{% endif %}">6h</a>
+            <a href="{{ url_for('diff_view', hours=12) }}" class="btn btn-filter {% if hours == 12 %}active{% endif %}">12h</a>
+            <a href="{{ url_for('diff_view', hours=24) }}" class="btn btn-filter {% if hours == 24 %}active{% endif %}">24h</a>
+            <a href="{{ url_for('diff_view', hours=48) }}" class="btn btn-filter {% if hours == 48 %}active{% endif %}">48h</a>
+            <a href="{{ url_for('diff_view', hours=168) }}" class="btn btn-filter {% if hours == 168 %}active{% endif %}">7d</a>
+        </div>
+    </div>
+
+    <!-- New Hosts -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-plus-circle me-2"></i>New Hosts ({{ new_hosts|length }})</h3>
+        {% if new_hosts %}
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>IP</th>
+                        <th>Hostname</th>
+                        <th>Discovery Method</th>
+                        <th>First Seen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for h in new_hosts %}
+                    <tr>
+                        <td class="mono highlight"><a href="{{ url_for('host_detail', ip=h.ip) }}">{{ h.ip }}</a></td>
+                        <td>{{ h.hostname or '—' }}</td>
+                        <td><span class="badge badge-ghost">{{ h.discovery_method or '—' }}</span></td>
+                        <td class="mono dim">{{ h.first_seen[:19] if h.first_seen else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No new hosts in this time window.</p>
+        {% endif %}
+    </div>
+
+    <!-- New Ports -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-plug me-2"></i>New Ports ({{ new_ports|length }})</h3>
+        {% if new_ports %}
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Host IP</th>
+                        <th>Port</th>
+                        <th>Protocol</th>
+                        <th>Service</th>
+                        <th>First Seen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in new_ports %}
+                    <tr>
+                        <td class="mono highlight"><a href="{{ url_for('host_detail', ip=p.ip) }}">{{ p.ip }}</a></td>
+                        <td class="mono">{{ p.port }}</td>
+                        <td class="mono">{{ p.protocol }}</td>
+                        <td>{{ p.service or '—' }}</td>
+                        <td class="mono dim">{{ p.first_seen[:19] if p.first_seen else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No new ports in this time window.</p>
+        {% endif %}
+    </div>
+
+    <!-- New Vulnerabilities -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-shield-exclamation me-2"></i>New Vulnerabilities ({{ new_vulns|length }})</h3>
+        {% if new_vulns %}
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Severity</th>
+                        <th>Name</th>
+                        <th>Host</th>
+                        <th>Port</th>
+                        <th>Detected</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for v in new_vulns %}
+                    <tr>
+                        <td><span class="severity-badge severity-{{ v.severity|lower }}">{{ v.severity|upper }}</span></td>
+                        <td>{{ v.name }}</td>
+                        <td class="mono highlight"><a href="{{ url_for('host_detail', ip=v.ip) }}">{{ v.ip }}</a></td>
+                        <td class="mono">{{ v.port or '—' }}</td>
+                        <td class="mono dim">{{ v.matched_at[:19] if v.matched_at else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No new vulnerabilities in this time window.</p>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}

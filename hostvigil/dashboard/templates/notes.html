@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Session Notes{% endblock %}
+{% block page_title %}Session Notes{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Notes</li>
+{% endblock %}
+
+{% block content %}
+<div class="notes-page">
+
+    <!-- New Note Form -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-pencil-square me-2"></i>New Note</h3>
+        <form method="POST" action="{{ url_for('notes') }}">
+            <div class="form-group mb-3">
+                <label for="noteTitle">Title</label>
+                <input type="text" class="form-control" id="noteTitle" name="title" placeholder="Note title..." required>
+            </div>
+            <div class="form-group mb-3">
+                <label for="noteContent">Content</label>
+                <textarea class="form-control" id="noteContent" name="content" rows="5" placeholder="Write your engagement notes here..." required></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-plus-circle me-1"></i>Save Note</button>
+        </form>
+    </div>
+
+    <!-- Existing Notes -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-journal-text me-2"></i>Saved Notes ({{ notes|length }})</h3>
+        {% if notes %}
+        {% for note in notes %}
+        <div class="note-card mb-3 p-3" style="border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg);">
+            <div class="d-flex justify-content-between align-items-start">
+                <h5 class="mb-1">{{ note.title }}</h5>
+                <span class="mono dim" style="font-size: 0.8rem;">{{ note.created_at[:19] if note.created_at else '' }}</span>
+            </div>
+            <p class="mb-0" style="white-space: pre-wrap;">{{ note.content }}</p>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">📝</div>
+            <h3>No Notes Yet</h3>
+            <p>Create your first engagement note above.</p>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}

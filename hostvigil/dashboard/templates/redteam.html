@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Red Team{% endblock %}
+{% block page_title %}Red Team Operations{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Red Team</li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="header-stats">
+        <span class="badge badge-pill badge-danger">Exploitable Targets</span>
+        <span class="redteam-subtitle">High & Critical vulnerabilities grouped by attack vector</span>
+    </div>
+</div>
+
+{% if categories %}
+<div class="redteam-grid">
+    {% for key, category in categories.items() %}
+    <div class="attack-vector-card">
+        <div class="vector-header">
+            <span class="vector-icon">{{ category.icon }}</span>
+            <span class="vector-label">{{ category.label }}</span>
+            <span class="vector-count badge badge-pill badge-danger">{{ category.items|length }}</span>
+        </div>
+        <div class="vector-targets">
+            {% for vuln in category.items %}
+            <div class="target-entry">
+                <div class="target-main">
+                    <span class="severity-badge severity-{{ vuln.severity|lower }}">{{ vuln.severity|upper }}</span>
+                    <span class="target-name">{{ vuln.name }}</span>
+                </div>
+                <div class="target-details">
+                    <span class="mono highlight">{{ vuln.ip }}</span>
+                    {% if vuln.port %}
+                    <span class="mono">:{{ vuln.port }}/{{ vuln.protocol }}</span>
+                    {% endif %}
+                    {% if vuln.service %}
+                    <span class="badge badge-ghost">{{ vuln.service }}</span>
+                    {% endif %}
+                    {% if vuln.is_verified %}
+                    <span class="badge badge-success">✓ Exploitable</span>
+                    {% endif %}
+                </div>
+                {% if vuln.evidence %}
+                <div class="target-evidence">
+                    <code>{{ vuln.evidence }}</code>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">💀</div>
+    <h3>No Exploitable Targets</h3>
+    <p>No critical or high severity vulnerabilities have been identified yet. Run scans to populate this view.</p>
+</div>
+{% endif %}
+{% endblock %}

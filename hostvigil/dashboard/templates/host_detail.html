@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+
+{% block title %}Host: {{ host.ip }}{% endblock %}
+{% block page_title %}Host Detail: {{ host.ip }}{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item"><a href="{{ url_for('hosts') }}">Hosts</a></li>
+<li class="breadcrumb-item active" aria-current="page">{{ host.ip }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="host-detail-page">
+
+    <!-- Host Actions Toolbar -->
+    <div class="section-card mb-3" style="padding: 12px 16px;">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-2">
+                <span class="fw-semibold text-muted" style="font-size: 0.85rem;">Actions:</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="hostAction('scan')" id="btn-action-scan">
+                    <i class="bi bi-plug me-1"></i>TCP Scan
+                </button>
+                <button class="btn btn-sm btn-outline-warning" onclick="hostAction('fingerprint')" id="btn-action-fingerprint">
+                    <i class="bi bi-cpu me-1"></i>OS Fingerprint
+                </button>
+                <button class="btn btn-sm btn-outline-info" onclick="hostAction('tls')" id="btn-action-tls">
+                    <i class="bi bi-lock me-1"></i>TLS Inspect
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="hostAction('enumerate')" id="btn-action-enumerate">
+                    <i class="bi bi-list-check me-1"></i>Enumerate
+                </button>
+                <button class="btn btn-sm btn-outline-danger" onclick="hostAction('nuclei')" id="btn-action-nuclei">
+                    <i class="bi bi-bug me-1"></i>Nuclei Scan
+                </button>
+            </div>
+            <div id="hostActionStatus" class="text-muted" style="font-size: 0.8rem;"></div>
+        </div>
+    </div>
+
+    <!-- Host Summary -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-hdd-network me-2"></i>Host Information</h3>
+        <div class="row">
+            <div class="col-md-6">
+                <table class="detail-table">
+                    <tr><th>IP Address</th><td class="mono highlight">{{ host.ip }}</td></tr>
+                    <tr><th>Hostname</th><td>{{ host.hostname or '—' }}</td></tr>
+                    <tr><th>MAC Address</th><td class="mono dim">{{ host.mac or '—' }}</td></tr>
+                    <tr><th>OS Fingerprint</th><td>{{ host.os_fingerprint or '—' }}</td></tr>
+                </table>
+            </div>
+            <div class="col-md-6">
+                <table class="detail-table">
+                    <tr><th>Status</th><td>
+                        {% if host.is_active %}
+                        <span class="badge badge-success">Active</span>
+                        {% else %}
+                        <span class="badge badge-ghost">Inactive</span>
+                        {% endif %}
+                    </td></tr>
+                    <tr><th>Discovery Method</th><td><span class="badge badge-ghost">{{ host.discovery_method or '—' }}</span></td></tr>
+                    <tr><th>First Seen</th><td class="mono dim">{{ host.first_seen[:19] if host.first_seen else '—' }}</td></tr>
+                    <tr><th>Last Seen</th><td class="mono dim">{{ host.last_seen[:19] if host.last_seen else '—' }}</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Open Ports -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-plug me-2"></i>Open Ports ({{ ports|length }})</h3>
+        {% if ports %}
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Port</th>
+                        <th>Protocol</th>
+                        <th>State</th>
+                        <th>Service</th>
+                        <th>Banner</th>
+                        <th>First Seen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for port in ports %}
+                    <tr>
+                        <td class="mono highlight">{{ port.port }}</td>
+                        <td class="mono">{{ port.protocol }}</td>
+                        <td><span class="badge badge-success">{{ port.state or 'open' }}</span></td>
+                        <td>{{ port.service or '—' }}</td>
+                        <td class="mono dim">{{ port.banner[:80] if port.banner else '—' }}</td>
+                        <td class="mono dim">{{ port.first_seen[:19] if port.first_seen else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No open ports discovered.</p>
+        {% endif %}
+    </div>
+
+    <!-- Vulnerabilities -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-shield-exclamation me-2"></i>Vulnerabilities ({{ vulns|length }})</h3>
+        {% if vulns %}
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Severity</th>
+                        <th>Name</th>
+                        <th>Port</th>
+                        <th>Template</th>
+                        <th>Detected</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for vuln in vulns %}
+                    <tr>
+                        <td><span class="severity-badge severity-{{ vuln.severity|lower }}">{{ vuln.severity|upper }}</span></td>
+                        <td>{{ vuln.name }}</td>
+                        <td class="mono">{{ vuln.port or '—' }}</td>
+                        <td class="mono dim">{{ vuln.template_id or '—' }}</td>
+                        <td class="mono dim">{{ vuln.matched_at[:19] if vuln.matched_at else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No vulnerabilities found for this host.</p>
+        {% endif %}
+    </div>
+
+    <!-- TLS Certificates -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-lock me-2"></i>TLS Certificates ({{ tls|length }})</h3>
+        {% if tls %}
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Port</th>
+                        <th>Subject</th>
+                        <th>Issuer</th>
+                        <th>Not After</th>
+                        <th>Protocol</th>
+                        <th>Issues</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cert in tls %}
+                    <tr>
+                        <td class="mono">{{ cert.port }}</td>
+                        <td>{{ cert.subject or '—' }}</td>
+                        <td class="dim">{{ cert.issuer or '—' }}</td>
+                        <td class="mono dim">{{ cert.not_after[:19] if cert.not_after else '—' }}</td>
+                        <td class="mono">{{ cert.protocol_version or '—' }}</td>
+                        <td>
+                            {% if cert.is_expired %}<span class="badge badge-danger">Expired</span>{% endif %}
+                            {% if cert.is_self_signed %}<span class="badge badge-warning">Self-signed</span>{% endif %}
+                            {% if cert.weak_cipher %}<span class="badge badge-warning">Weak cipher</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No TLS data collected for this host.</p>
+        {% endif %}
+    </div>
+
+    <!-- Anomalies -->
+    <div class="section-card">
+        <h3 class="section-title"><i class="bi bi-activity me-2"></i>Anomalies ({{ anomalies|length }})</h3>
+        {% if anomalies %}
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Score</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                        <th>Detected</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in anomalies %}
+                    <tr>
+                        <td><span class="badge {% if a.score >= 0.8 %}badge-danger{% elif a.score >= 0.5 %}badge-warning{% else %}badge-info-custom{% endif %}">{{ '%.2f'|format(a.score) }}</span></td>
+                        <td>{{ a.anomaly_type }}</td>
+                        <td>{{ a.description or '—' }}</td>
+                        <td class="mono dim">{{ a.detected_at[:19] if a.detected_at else '—' }}</td>
+                        <td>
+                            {% if a.is_reviewed %}
+                            <span class="badge badge-ghost">Reviewed</span>
+                            {% else %}
+                            <span class="badge badge-warning">Unreviewed</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No anomalies detected for this host.</p>
+        {% endif %}
+    </div>
+
+</div>
+
+<script>
+const HOST_IP = '{{ host.ip }}';
+
+function hostAction(scanType) {
+    const btn = document.getElementById('btn-action-' + scanType);
+    const statusEl = document.getElementById('hostActionStatus');
+    if (btn) btn.disabled = true;
+    statusEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running ' + scanType + '...';
+
+    fetch('/api/hosts/' + HOST_IP + '/scan', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({scan_type: scanType})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            statusEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + data.error + '</span>';
+            if (btn) btn.disabled = false;
+        } else {
+            statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + data.message + '</span>';
+            // Re-enable after 5 seconds
+            setTimeout(() => { if (btn) btn.disabled = false; statusEl.textContent = ''; }, 5000);
+        }
+    })
+    .catch(err => {
+        statusEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>Failed: ' + err.message + '</span>';
+        if (btn) btn.disabled = false;
+    });
+}
+</script>
+{% endblock %}

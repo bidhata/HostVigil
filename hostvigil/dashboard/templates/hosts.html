@@ -1,0 +1,370 @@
+{% extends "base.html" %}
+
+{% block title %}Hosts{% endblock %}
+{% block page_title %}Host Inventory{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Hosts</li>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+    .hosts-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+        flex-wrap: wrap;
+    }
+    .hosts-toolbar .search-input {
+        flex: 1;
+        min-width: 200px;
+        padding: 8px 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color, #e0e0e0);
+        background: var(--card-bg, #fff);
+        font-size: 0.85rem;
+    }
+    .hosts-toolbar .search-input:focus {
+        outline: none;
+        border-color: #0088cc;
+        box-shadow: 0 0 0 2px rgba(0,136,204,0.1);
+    }
+    .hosts-toolbar select {
+        padding: 8px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color, #e0e0e0);
+        background: var(--card-bg, #fff);
+        font-size: 0.85rem;
+        min-width: 160px;
+    }
+    .hosts-count {
+        font-size: 0.8rem;
+        color: #888;
+        white-space: nowrap;
+    }
+
+    .hosts-table-wrap {
+        background: var(--card-bg, #fff);
+        border: 1px solid var(--border-color, #e9ecef);
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .hosts-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.83rem;
+    }
+    .hosts-table th {
+        padding: 10px 14px;
+        text-align: left;
+        font-weight: 600;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #888;
+        border-bottom: 1px solid var(--border-color, #e9ecef);
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+    }
+    .hosts-table th:hover { color: #0088cc; }
+    .hosts-table th .sort-icon { margin-left: 4px; font-size: 0.7rem; opacity: 0.5; }
+    .hosts-table th.sorted .sort-icon { opacity: 1; color: #0088cc; }
+    .hosts-table td {
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border-color, #f1f3f5);
+        vertical-align: middle;
+    }
+    .hosts-table tr:last-child td { border-bottom: none; }
+    .hosts-table tr:hover { background: rgba(0,136,204,0.03); }
+
+    .host-ip-link { color: #0088cc; text-decoration: none; font-weight: 600; font-family: monospace; }
+    .host-ip-link:hover { text-decoration: underline; }
+
+    .status-dot-sm {
+        width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+    }
+    .status-dot-sm.active { background: #28a745; }
+    .status-dot-sm.inactive { background: #adb5bd; }
+
+    .action-dropdown { position: relative; display: inline-block; }
+    .action-btn {
+        background: none; border: 1px solid var(--border-color, #e0e0e0);
+        border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 0.8rem;
+    }
+    .action-btn:hover { background: rgba(0,0,0,0.04); }
+    .action-menu {
+        display: none; position: absolute; right: 0; top: 100%; margin-top: 4px;
+        background: var(--card-bg, #fff); border: 1px solid var(--border-color, #e0e0e0);
+        border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        z-index: 100; min-width: 160px; padding: 4px 0;
+    }
+    .action-menu.show { display: block; }
+    .action-menu a, .action-menu button {
+        display: block; width: 100%; padding: 8px 14px; text-align: left;
+        font-size: 0.8rem; border: none; background: none; cursor: pointer;
+        color: inherit; text-decoration: none;
+    }
+    .action-menu a:hover, .action-menu button:hover { background: rgba(0,136,204,0.06); }
+
+    .pagination-bar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 12px 16px; border-top: 1px solid var(--border-color, #e9ecef);
+        font-size: 0.8rem;
+    }
+    .pagination-bar .page-btns { display: flex; gap: 4px; }
+    .pagination-bar .page-btn {
+        padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-color, #e0e0e0);
+        background: var(--card-bg, #fff); cursor: pointer; font-size: 0.78rem;
+    }
+    .pagination-bar .page-btn:hover { border-color: #0088cc; }
+    .pagination-bar .page-btn.active { background: #0088cc; color: #fff; border-color: #0088cc; }
+    .pagination-bar .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .skeleton-row td { padding: 12px 14px; }
+    .skeleton-bar {
+        height: 14px; border-radius: 4px;
+        background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.5s infinite;
+    }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    .empty-state-table {
+        text-align: center; padding: 60px 20px; color: #999;
+    }
+    .empty-state-table i { font-size: 3rem; margin-bottom: 12px; display: block; opacity: 0.4; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Toolbar -->
+<div class="hosts-toolbar">
+    <input type="text" class="search-input" id="hostSearch" placeholder="Search by IP, hostname, OS...">
+    <select id="subnetFilter">
+        <option value="">All Subnets</option>
+    </select>
+    <span class="hosts-count" id="hostsCount">Loading...</span>
+</div>
+
+<!-- Table -->
+<div class="hosts-table-wrap">
+    <table class="hosts-table" id="hostsTable">
+        <thead>
+            <tr>
+                <th data-sort="is_active">Status <span class="sort-icon">&#8597;</span></th>
+                <th data-sort="ip">IP Address <span class="sort-icon">&#8597;</span></th>
+                <th data-sort="hostname">Hostname <span class="sort-icon">&#8597;</span></th>
+                <th data-sort="os">OS <span class="sort-icon">&#8597;</span></th>
+                <th data-sort="port_count">Ports <span class="sort-icon">&#8597;</span></th>
+                <th data-sort="anomaly_count">Anomalies <span class="sort-icon">&#8597;</span></th>
+                <th data-sort="discovery_method">Discovery <span class="sort-icon">&#8597;</span></th>
+                <th data-sort="last_seen">Last Seen <span class="sort-icon">&#8597;</span></th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="hostsTableBody">
+            <!-- Skeleton rows on initial load -->
+            <tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:100%"></div></td></tr>
+            <tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:90%"></div></td></tr>
+            <tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:95%"></div></td></tr>
+            <tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:85%"></div></td></tr>
+            <tr class="skeleton-row"><td colspan="9"><div class="skeleton-bar" style="width:92%"></div></td></tr>
+        </tbody>
+    </table>
+
+    <!-- Pagination -->
+    <div class="pagination-bar" id="paginationBar">
+        <span id="pageInfo">—</span>
+        <div class="page-btns" id="pageButtons"></div>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+(function() {
+    var currentPage = 1;
+    var perPage = 50;
+    var currentQuery = '';
+    var currentSubnet = '';
+    var currentSort = 'last_seen';
+    var currentOrder = 'desc';
+    var debounceTimer = null;
+    var openMenu = null;
+
+    var searchInput = document.getElementById('hostSearch');
+    var subnetFilter = document.getElementById('subnetFilter');
+    var tbody = document.getElementById('hostsTableBody');
+    var pageInfo = document.getElementById('pageInfo');
+    var pageButtons = document.getElementById('pageButtons');
+    var hostsCount = document.getElementById('hostsCount');
+
+    // Debounced search
+    searchInput.addEventListener('input', function() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(function() {
+            currentQuery = searchInput.value.trim();
+            currentPage = 1;
+            fetchHosts();
+        }, 400);
+    });
+
+    subnetFilter.addEventListener('change', function() {
+        currentSubnet = subnetFilter.value;
+        currentPage = 1;
+        fetchHosts();
+    });
+
+    // Sortable headers
+    document.querySelectorAll('#hostsTable th[data-sort]').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var field = th.getAttribute('data-sort');
+            if (currentSort === field) {
+                currentOrder = currentOrder === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort = field;
+                currentOrder = 'asc';
+            }
+            document.querySelectorAll('#hostsTable th').forEach(function(h) { h.classList.remove('sorted'); });
+            th.classList.add('sorted');
+            currentPage = 1;
+            fetchHosts();
+        });
+    });
+
+    function fetchHosts() {
+        var url = '/api/hosts?page=' + currentPage + '&per_page=' + perPage;
+        if (currentQuery) url += '&q=' + encodeURIComponent(currentQuery);
+        if (currentSubnet) url += '&subnet=' + encodeURIComponent(currentSubnet);
+        if (currentSort) url += '&sort=' + currentSort + '&order=' + currentOrder;
+
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                renderTable(data.hosts || []);
+                renderPagination(data.total || 0, data.page || 1, data.per_page || perPage);
+                renderSubnets(data.subnets || []);
+                hostsCount.textContent = (data.total || 0).toLocaleString() + ' hosts';
+            })
+            .catch(function() {
+                tbody.innerHTML = '<tr><td colspan="9" class="empty-state-table"><i class="bi bi-exclamation-circle"></i>Failed to load hosts</td></tr>';
+            });
+    }
+
+    function renderTable(hosts) {
+        if (hosts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" class="empty-state-table"><i class="bi bi-hdd-network"></i><strong>No hosts found</strong><br>Run a discovery scan or adjust your search.</td></tr>';
+            return;
+        }
+        var html = '';
+        hosts.forEach(function(h) {
+            var statusClass = h.is_active ? 'active' : 'inactive';
+            var statusTitle = h.is_active ? 'Active' : 'Inactive';
+            var anomalyBadge = h.anomaly_count > 0
+                ? '<span class="badge bg-danger bg-opacity-75">' + h.anomaly_count + '</span>'
+                : '<span class="badge bg-secondary bg-opacity-25 text-secondary">0</span>';
+            html += '<tr>'
+                + '<td><span class="status-dot-sm ' + statusClass + '" title="' + statusTitle + '"></span></td>'
+                + '<td><a href="/hosts/' + encodeURIComponent(h.ip) + '" class="host-ip-link">' + escapeHtml(h.ip) + '</a></td>'
+                + '<td>' + escapeHtml(h.hostname || '\u2014') + '</td>'
+                + '<td>' + escapeHtml(h.os || '\u2014') + '</td>'
+                + '<td><span class="badge bg-info bg-opacity-25 text-info">' + (h.port_count || 0) + '</span></td>'
+                + '<td>' + anomalyBadge + '</td>'
+                + '<td><span class="badge bg-secondary bg-opacity-10 text-secondary">' + escapeHtml(h.discovery_method || '\u2014') + '</span></td>'
+                + '<td class="mono" style="font-size:0.75rem;color:#888;">' + escapeHtml((h.last_seen || '').substring(0, 19) || '\u2014') + '</td>'
+                + '<td>' + renderActions(h.ip) + '</td>'
+                + '</tr>';
+        });
+        tbody.innerHTML = html;
+    }
+
+    function renderActions(ip) {
+        return '<div class="action-dropdown">'
+            + '<button class="action-btn" onclick="toggleMenu(event, this)"><i class="bi bi-three-dots"></i></button>'
+            + '<div class="action-menu">'
+            + '<a href="/hosts/' + encodeURIComponent(ip) + '">View Details</a>'
+            + '<button onclick="scanHost(\'' + escapeHtml(ip) + '\', \'scan\')">Scan this host</button>'
+            + '<button onclick="scanHost(\'' + escapeHtml(ip) + '\', \'nuclei\')">Run Nuclei</button>'
+            + '</div></div>';
+    }
+
+    function renderPagination(total, page, pp) {
+        var totalPages = Math.ceil(total / pp);
+        if (totalPages <= 1) {
+            pageInfo.textContent = total + ' hosts';
+            pageButtons.innerHTML = '';
+            return;
+        }
+        var start = (page - 1) * pp + 1;
+        var end = Math.min(page * pp, total);
+        pageInfo.textContent = start + '\u2013' + end + ' of ' + total;
+
+        var html = '';
+        html += '<button class="page-btn" onclick="hvGoPage(' + (page - 1) + ')"' + (page <= 1 ? ' disabled' : '') + '>&laquo;</button>';
+        var startP = Math.max(1, page - 2);
+        var endP = Math.min(totalPages, page + 2);
+        for (var i = startP; i <= endP; i++) {
+            html += '<button class="page-btn' + (i === page ? ' active' : '') + '" onclick="hvGoPage(' + i + ')">' + i + '</button>';
+        }
+        html += '<button class="page-btn" onclick="hvGoPage(' + (page + 1) + ')"' + (page >= totalPages ? ' disabled' : '') + '>&raquo;</button>';
+        pageButtons.innerHTML = html;
+    }
+
+    function renderSubnets(subnets) {
+        var current = subnetFilter.value;
+        // Only re-render if subnets changed
+        if (subnetFilter.options.length - 1 === subnets.length) return;
+        var html = '<option value="">All Subnets</option>';
+        subnets.forEach(function(s) {
+            html += '<option value="' + escapeHtml(s) + '"' + (s === current ? ' selected' : '') + '>' + escapeHtml(s) + '</option>';
+        });
+        subnetFilter.innerHTML = html;
+    }
+
+    function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
+    // Expose global functions
+    window.hvGoPage = function(page) {
+        currentPage = page;
+        fetchHosts();
+    };
+
+    window.toggleMenu = function(e, btn) {
+        e.stopPropagation();
+        var menu = btn.nextElementSibling;
+        if (openMenu && openMenu !== menu) openMenu.classList.remove('show');
+        menu.classList.toggle('show');
+        openMenu = menu.classList.contains('show') ? menu : null;
+    };
+
+    window.scanHost = function(ip, type) {
+        if (openMenu) { openMenu.classList.remove('show'); openMenu = null; }
+        fetch('/api/hosts/' + encodeURIComponent(ip) + '/scan', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({type: type})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) alert('Error: ' + data.error);
+            else alert((type === 'nuclei' ? 'Nuclei' : 'Scan') + ' started for ' + ip);
+        })
+        .catch(function(err) { alert('Failed: ' + err.message); });
+    };
+
+    // Close menus on outside click
+    document.addEventListener('click', function() {
+        if (openMenu) { openMenu.classList.remove('show'); openMenu = null; }
+    });
+
+    // Initial load
+    fetchHosts();
+})();
+</script>
+{% endblock %}

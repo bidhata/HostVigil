@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+
+{% block title %}Vulnerabilities{% endblock %}
+{% block page_title %}Vulnerability Findings{% endblock %}
+{% block breadcrumb %}
+<li class="breadcrumb-item active" aria-current="page">Vulnerabilities</li>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="filter-bar">
+        <span class="filter-label">Filter:</span>
+        <a href="{{ url_for('vulnerabilities') }}" class="btn btn-filter {% if not current_filter %}active{% endif %}">All</a>
+        <a href="{{ url_for('vulnerabilities', severity='critical') }}" class="btn btn-filter btn-critical {% if current_filter == 'critical' %}active{% endif %}">Critical</a>
+        <a href="{{ url_for('vulnerabilities', severity='high') }}" class="btn btn-filter btn-high {% if current_filter == 'high' %}active{% endif %}">High</a>
+        <a href="{{ url_for('vulnerabilities', severity='medium') }}" class="btn btn-filter btn-medium {% if current_filter == 'medium' %}active{% endif %}">Medium</a>
+        <a href="{{ url_for('vulnerabilities', severity='low') }}" class="btn btn-filter btn-low {% if current_filter == 'low' %}active{% endif %}">Low</a>
+        <a href="{{ url_for('vulnerabilities', severity='info') }}" class="btn btn-filter btn-info {% if current_filter == 'info' %}active{% endif %}">Info</a>
+    </div>
+    <div class="header-stats">
+        <span class="badge badge-pill badge-danger">{{ vulnerabilities|length }} findings</span>
+    </div>
+    <div class="search-box mt-2">
+        <input type="text" class="form-control" id="vulnSearch" placeholder="🔍 Search by name, IP, service, template..." oninput="filterVulns()">
+    </div>
+</div>
+
+{% if vulnerabilities %}
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Severity</th>
+                <th>Name</th>
+                <th>Target</th>
+                <th>Port/Service</th>
+                <th>Template</th>
+                <th>Verified</th>
+                <th>Detected</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for vuln in vulnerabilities %}
+            <tr>
+                <td>
+                    <span class="severity-badge severity-{{ vuln.severity|lower }}">{{ vuln.severity|upper }}</span>
+                </td>
+                <td class="vuln-name">{{ vuln.name }}</td>
+                <td class="mono highlight">{{ vuln.ip }}{% if vuln.hostname %} <span class="dim">({{ vuln.hostname }})</span>{% endif %}</td>
+                <td class="mono">
+                    {% if vuln.port %}
+                    {{ vuln.port }}/{{ vuln.protocol }}
+                    {% if vuln.service %}<span class="dim"> ({{ vuln.service }})</span>{% endif %}
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+                <td class="mono dim">{{ vuln.template_id or '—' }}</td>
+                <td>
+                    {% if vuln.is_verified %}
+                    <span class="badge badge-success">✓ Verified</span>
+                    {% else %}
+                    <span class="badge badge-ghost">Unverified</span>
+                    {% endif %}
+                </td>
+                <td class="mono dim">{{ vuln.matched_at[:19] if vuln.matched_at else '—' }}</td>
+            </tr>
+            {% if vuln.description %}
+            <tr class="detail-row">
+                <td></td>
+                <td colspan="6" class="vuln-detail">
+                    {{ vuln.description }}
+                    {% if vuln.evidence %}
+                    <div class="evidence-block">
+                        <strong>Evidence:</strong> <code>{{ vuln.evidence }}</code>
+                    </div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">🛡️</div>
+    <h3>No Vulnerabilities Found</h3>
+    <p>{% if current_filter %}No {{ current_filter }} severity findings. Try a different filter.{% else %}Run a nuclei scan to detect vulnerabilities.{% endif %}</p>
+</div>
+{% endif %}
+
+{% block scripts %}
+<script>
+function filterVulns() {
+    const query = document.getElementById('vulnSearch').value.toLowerCase();
+    const rows = document.querySelectorAll('.data-table tbody tr');
+    let lastMainRow = null;
+    rows.forEach(row => {
+        if (row.classList.contains('detail-row')) {
+            // Show/hide detail rows based on their parent main row
+            row.style.display = lastMainRow && lastMainRow.style.display !== 'none' ? '' : 'none';
+        } else {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(query) ? '' : 'none';
+            lastMainRow = row;
+        }
+    });
+}
+</script>
+{% endblock %}
+{% endblock %}
