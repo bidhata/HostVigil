@@ -15,12 +15,11 @@ Example config.yaml:
 
 import logging
 import threading
-from typing import Dict, Callable, Optional
+from typing import Dict, Callable
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.cron import CronTrigger
-    from apscheduler.triggers.interval import IntervalTrigger
     APSCHEDULER_AVAILABLE = True
 except ImportError:
     APSCHEDULER_AVAILABLE = False
@@ -200,13 +199,15 @@ class CronScheduler:
                 func()
             except Exception as e:
                 logger.error(f"Fallback job '{name}' failed: {e}")
-            # Reschedule with jitter
+            # Reschedule (jitter is applied per-cycle below)
             if self._running:
-                jitter = random.uniform(-300, 300)  # ±5 min
-                interval = hours * 3600 + jitter
                 self._start_fallback_timer(name, func, hours)
 
-        interval = hours * 3600
+        # Apply ±5 min jitter to every interval so fallback runs are not
+        # perfectly periodic (preserves stealth timing). Floor at 60s to
+        # avoid negative/near-zero intervals for sub-hourly jobs.
+        jitter = random.uniform(-300, 300)
+        interval = max(60.0, hours * 3600 + jitter)
         timer = threading.Timer(interval, _run)
         timer.daemon = True
         timer.start()

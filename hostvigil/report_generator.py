@@ -17,6 +17,8 @@ logger = logging.getLogger('hostvigil.report_generator')
 class ReportGenerator:
     """Generate print-ready HTML security assessment reports."""
 
+    _SENSITIVE_PORTS = (21, 22, 23, 25, 53, 88, 135, 139, 389, 445, 465, 514, 587, 636, 993, 995, 1080, 1433, 1521, 2049, 2375, 2376, 3306, 3389, 5432, 5900, 5985, 5986, 6379, 8080, 8443, 9200, 9300, 11211, 27017)
+
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.output_dir = Path('data/reports')
@@ -62,19 +64,71 @@ class ReportGenerator:
         }
 
     def _get_hosts(self) -> List[Dict]:
-        """Get host inventory."""
+        """Get host inventory sorted by exposure and finding density."""
         return self._query("""
-            SELECT h.ip, h.hostname, h.os_fingerprint, h.first_seen, h.last_seen,
+            SELECT
+                   h.ip,
+                   h.hostname,
+                   h.os_fingerprint,
+                   h.first_seen,
+                   h.last_seen,
                    h.discovery_method,
-                   COUNT(DISTINCT p.id) as port_count,
-                   COUNT(DISTINCT v.id) as vuln_count
+                   (SELECT COUNT(*) FROM ports p WHERE p.host_id = h.id AND p.is_active = 1 AND p.state = 'open') AS port_count,
+                   (SELECT COUNT(*) FROM vulnerabilities v WHERE v.host_id = h.id) AS vuln_count,
+                   (SELECT COUNT(*) FROM service_enumeration se WHERE se.host_id = h.id) AS service_enum_count,
+                   (SELECT COUNT(*) FROM ports p WHERE p.host_id = h.id AND p.is_active = 1 AND p.state = 'open' AND p.port IN ({ports})) AS sensitive_port_count,
+                   (SELECT COUNT(*) FROM service_enumeration se WHERE se.host_id = h.id AND LOWER(COALESCE(se.risk_level, se.severity, '')) IN ('critical', 'high')) AS high_service_findings,
+                     (SELECT GROUP_CONCAT(DISTINCT ht.tag) FROM host_tags ht WHERE ht.host_id = h.id AND ht.tag IN ('host-takeover', 'relay-risk', 'pivot-node', 'domain-enum', 'credential-harvest', 'lateral-movement', 'data-exposure', 'admin-plane')) AS attack_tags,
+                   (SELECT COUNT(*) FROM anomalies a WHERE a.host_id = h.id AND a.is_reviewed = 0) AS anomaly_count
             FROM hosts h
             LEFT JOIN ports p ON p.host_id = h.id AND p.is_active = 1
             LEFT JOIN vulnerabilities v ON v.host_id = h.id
             WHERE h.is_active = 1
             GROUP BY h.id
-            ORDER BY vuln_count DESC, port_count DESC
-        """)
+            ORDER BY high_service_findings DESC, sensitive_port_count DESC, vuln_count DESC, port_count DESC
+        """.format(ports=','.join(str(port) for port in self._SENSITIVE_PORTS)))
+
+    def _host_risk_score(self, host: Dict) -> int:
+        """Calculate an exposure score for a host."""
+        score = 0
+        score += min(int(host.get('vuln_count') or 0) * 12, 36)
+        score += min(int(host.get('high_service_findings') or 0) * 15, 30)
+        score += min(int(host.get('sensitive_port_count') or 0) * 4, 28)
+        score += min(int(host.get('anomaly_count') or 0) * 3, 12)
+        score += min(int(host.get('service_enum_count') or 0) * 2, 8)
+
+        attack_tags = self._host_attack_tags(host)
+        score += min(len(attack_tags & {'host-takeover', 'relay-risk'}) * 16, 32)
+        score += min(len(attack_tags & {'pivot-node', 'lateral-movement'}) * 8, 24)
+        score += min(len(attack_tags & {'domain-enum', 'credential-harvest', 'admin-plane'}) * 6, 18)
+        return min(score, 100)
+
+    def _host_attack_tags(self, host: Dict) -> set:
+        """Return attack tags derived from service enumeration for a host."""
+        raw = host.get('attack_tags') or host.get('service_attack_tags') or ''
+        if isinstance(raw, list):
+            return {str(item).strip().lower() for item in raw if str(item).strip()}
+        if not raw:
+            return set()
+        return {part.strip().lower().replace('_', '-') for part in str(raw).split(',') if part.strip()}
+
+    def _host_risk_label(self, score: int) -> str:
+        if score >= 70:
+            return 'CRITICAL'
+        if score >= 45:
+            return 'HIGH'
+        if score >= 20:
+            return 'MEDIUM'
+        return 'LOW'
+
+    def _host_risk_color(self, score: int) -> str:
+        if score >= 70:
+            return '#dc3545'
+        if score >= 45:
+            return '#ff6d00'
+        if score >= 20:
+            return '#fcb92c'
+        return '#1cbb8c'
 
     def _get_vulnerabilities(self) -> List[Dict]:
         """Get all vulnerabilities sorted by severity."""
@@ -245,13 +299,26 @@ class ReportGenerator:
         # Build host table rows
         host_rows = ''
         for h in hosts[:100]:
+            risk_score = self._host_risk_score(h)
+            risk_label = self._host_risk_label(risk_score)
+            risk_color = self._host_risk_color(risk_score)
+            signals = []
+            if h.get('sensitive_port_count', 0):
+                signals.append(f"{h['sensitive_port_count']} sensitive ports")
+            if h.get('high_service_findings', 0):
+                signals.append(f"{h['high_service_findings']} high-risk service findings")
+            if h.get('anomaly_count', 0):
+                signals.append(f"{h['anomaly_count']} anomalies")
+            signal_text = ', '.join(signals) if signals else '-'
             host_rows += f"""<tr>
+                <td><span style=\"background:{risk_color};color:#fff;padding:2px 8px;border-radius:3px;font-size:0.75rem;font-weight:600;\">{risk_label} {risk_score}</span></td>
                 <td><code>{_esc(h['ip'])}</code></td>
                 <td>{_esc(h.get('hostname') or '-')}</td>
                 <td>{_esc(h.get('os_fingerprint') or '-')}</td>
                 <td>{h['port_count']}</td>
                 <td>{h['vuln_count']}</td>
                 <td>{_esc(h.get('discovery_method') or '-')}</td>
+                <td>{_esc(signal_text)}</td>
             </tr>\n"""
 
         # Build anomaly table rows
@@ -366,8 +433,8 @@ class ReportGenerator:
     <h2>4. Host Inventory</h2>
     <p>Total active hosts: <strong>{stats['total_hosts']}</strong></p>
     <table>
-        <thead><tr><th>IP</th><th>Hostname</th><th>OS</th><th>Ports</th><th>Vulns</th><th>Discovery</th></tr></thead>
-        <tbody>{host_rows if host_rows else '<tr><td colspan="6" class="empty">No hosts discovered</td></tr>'}</tbody>
+        <thead><tr><th>Risk</th><th>IP</th><th>Hostname</th><th>OS</th><th>Ports</th><th>Vulns</th><th>Discovery</th><th>Signals</th></tr></thead>
+        <tbody>{host_rows if host_rows else '<tr><td colspan="8" class="empty">No hosts discovered</td></tr>'}</tbody>
     </table>
 </div>
 

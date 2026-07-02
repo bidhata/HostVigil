@@ -11,7 +11,6 @@ accumulate for ML model training.
 import numpy as np
 import logging
 import sqlite3
-import json
 import pickle
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Tuple, Optional
@@ -19,7 +18,6 @@ from pathlib import Path
 
 try:
     from sklearn.ensemble import IsolationForest
-    from sklearn.neighbors import LocalOutlierFactor
     from sklearn.preprocessing import StandardScaler
     SKLEARN_AVAILABLE = True
 except ImportError:

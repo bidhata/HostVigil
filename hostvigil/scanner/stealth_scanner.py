@@ -12,7 +12,6 @@ Enhanced port scanner with IDS evasion capabilities:
 """
 
 import socket
-import struct
 import time
 import random
 import logging

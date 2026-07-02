@@ -14,6 +14,156 @@
     </div>
 </div>
 
+{% if best_footholds %}
+<div class="page-header" style="margin-top: 1.5rem;">
+    <div class="header-stats">
+        <span class="badge badge-pill badge-warning">Best Footholds</span>
+        <span class="redteam-subtitle">Top five places to gain useful access</span>
+    </div>
+</div>
+<div class="redteam-grid">
+    {% for foothold in best_footholds %}
+    <div class="attack-vector-card">
+        <div class="vector-header">
+            <span class="vector-icon">🎯</span>
+            <span class="vector-label">{{ foothold.rank_label }}</span>
+            <span class="vector-count badge badge-pill badge-warning">{{ foothold.score }}/100</span>
+        </div>
+        <div class="vector-targets">
+            <div class="target-entry">
+                <div class="target-main">
+                    <span class="target-name"><code>{{ foothold.host_ip }}</code>{% if foothold.hostname %} <span class="text-muted">({{ foothold.hostname }})</span>{% endif %}</span>
+                </div>
+                <div class="target-details">
+                    {% for reason in foothold.reasons[:3] %}
+                    <span class="badge badge-ghost">{{ reason }}</span>
+                    {% endfor %}
+                </div>
+                <div class="target-details" style="margin-top: 0.5rem;">
+                    {% for tag in foothold.attack_tags[:5] %}
+                    <span class="badge badge-ghost">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if crown_jewels %}
+<div class="page-header" style="margin-top: 1.5rem;">
+    <div class="header-stats">
+        <span class="badge badge-pill badge-danger">Crown Jewels</span>
+        <span class="redteam-subtitle">Targets that should shape the rest of the engagement</span>
+    </div>
+</div>
+<div class="redteam-grid">
+    {% for jewel in crown_jewels %}
+    <div class="attack-vector-card">
+        <div class="vector-header">
+            <span class="vector-icon">👑</span>
+            <span class="vector-label">{{ jewel.rank_label }}</span>
+            <span class="vector-count badge badge-pill badge-danger">{{ jewel.score }}/100</span>
+        </div>
+        <div class="vector-targets">
+            <div class="target-entry">
+                <div class="target-main">
+                    <span class="target-name"><code>{{ jewel.host_ip }}</code>{% if jewel.hostname %} <span class="text-muted">({{ jewel.hostname }})</span>{% endif %}</span>
+                </div>
+                <div class="target-details">
+                    {% for reason in jewel.reasons[:3] %}
+                    <span class="badge badge-ghost">{{ reason }}</span>
+                    {% endfor %}
+                </div>
+                <div class="target-details" style="margin-top: 0.5rem;">
+                    {% for tag in jewel.attack_tags[:5] %}
+                    <span class="badge badge-ghost">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if credential_clusters %}
+<div class="page-header" style="margin-top: 1.5rem;">
+    <div class="header-stats">
+        <span class="badge badge-pill badge-info">Credential Clusters</span>
+        <span class="redteam-subtitle">Reused credentials that can widen reach across hosts</span>
+    </div>
+</div>
+<div class="redteam-grid">
+    {% for cluster in credential_clusters %}
+    <div class="attack-vector-card">
+        <div class="vector-header">
+            <span class="vector-icon">🔁</span>
+            <span class="vector-label">{{ cluster.label }}</span>
+            <span class="vector-count badge badge-pill badge-info">{{ cluster.host_count }} hosts</span>
+        </div>
+        <div class="vector-targets">
+            <div class="target-entry">
+                <div class="target-main">
+                    <span class="target-name">{{ cluster.service or 'multi-service' }}</span>
+                </div>
+                <div class="target-details">
+                    {% for host in cluster.hosts[:5] %}
+                    <span class="badge badge-ghost"><code>{{ host }}</code></span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if pivot_paths %}
+<div class="page-header" style="margin-top: 2rem;">
+    <div class="header-stats">
+        <span class="badge badge-pill badge-primary">Best Pivot Paths</span>
+        <span class="redteam-subtitle">Shortest routes from foothold to higher-value internal targets</span>
+    </div>
+</div>
+<div class="redteam-grid">
+    {% for path in pivot_paths %}
+    <div class="attack-vector-card">
+        <div class="vector-header">
+            <span class="vector-icon">↗️</span>
+            <span class="vector-label">Path {{ loop.index }}</span>
+            <span class="vector-count badge badge-pill badge-primary">{{ path.score }}/100</span>
+        </div>
+        <div class="vector-targets">
+            <div class="target-entry">
+                <div class="target-main">
+                    <span class="target-name"><code>{{ path.foothold.host }}</code> → <code>{{ path.pivot.host }}</code></span>
+                </div>
+                <div class="target-details">
+                    <span class="badge badge-ghost">{{ path.foothold.technique }}</span>
+                    <span class="badge badge-ghost">{{ path.lateral.method }}</span>
+                    {% if path.lateral.port %}
+                    <span class="badge badge-ghost">{{ path.lateral.port }}</span>
+                    {% endif %}
+                </div>
+                <div class="target-details" style="margin-top: 0.5rem;">
+                    {% for reason in path.pivot.reasons[:3] %}
+                    <span class="badge badge-ghost">{{ reason }}</span>
+                    {% endfor %}
+                </div>
+                {% if path.pivot.is_crown_jewel %}
+                <div class="target-details" style="margin-top: 0.5rem;">
+                    <span class="badge badge-pill badge-danger">Crown Jewel Pivot</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 {% if categories %}
 <div class="redteam-grid">
     {% for key, category in categories.items() %}
@@ -58,6 +208,46 @@
     <div class="empty-icon">💀</div>
     <h3>No Exploitable Targets</h3>
     <p>No critical or high severity vulnerabilities have been identified yet. Run scans to populate this view.</p>
+</div>
+{% endif %}
+
+{% if primitive_categories %}
+<div class="page-header" style="margin-top: 2rem;">
+    <div class="header-stats">
+        <span class="badge badge-pill badge-warning">Attack Primitives</span>
+        <span class="redteam-subtitle">Service-level pivot opportunities and admin-plane exposure</span>
+    </div>
+</div>
+<div class="redteam-grid">
+    {% for key, category in primitive_categories.items() %}
+    <div class="attack-vector-card">
+        <div class="vector-header">
+            <span class="vector-icon">{{ category.icon }}</span>
+            <span class="vector-label">{{ category.label }}</span>
+            <span class="vector-count badge badge-pill badge-warning">{{ category.items|length }}</span>
+        </div>
+        <div class="vector-targets">
+            {% for item in category.items %}
+            <div class="target-entry">
+                <div class="target-main">
+                    <span class="severity-badge severity-{{ item.risk_level|default('info')|lower }}">{{ item.risk_level|default('info')|upper }}</span>
+                    <span class="target-name">{{ item.title or item.service_type }}</span>
+                </div>
+                <div class="target-details">
+                    <span class="mono highlight">{{ item.ip }}</span>
+                    <span class="mono">:{{ item.port }}</span>
+                    {% if item.hostname %}
+                    <span class="badge badge-ghost">{{ item.hostname }}</span>
+                    {% endif %}
+                    {% if item.service_type %}
+                    <span class="badge badge-ghost">{{ item.service_type }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
 </div>
 {% endif %}
 {% endblock %}

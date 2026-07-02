@@ -144,6 +144,8 @@ That's it. HostVigil is now **automatically scanning** your network in continuou
 | **Credential Spray** | SSH, RDP, SMB, WinRM, Redis, ES, MySQL, Postgres — 1 attempt/host/hour |
 | **AD Integration** | Users, groups, Kerberoastable, AS-REP roastable, trusts |
 
+> **Port scan runtime note:** the default TCP scan is intentionally stealthy. It uses randomized delays, adaptive throttling, and a small worker pool, so scanning 19 hosts can take noticeable time even with a modest port profile. For faster operator-driven runs, lower `min_delay` / `max_delay`, raise `max_threads`, or switch to the `quick` port profile in `config.yaml`.
+
 ### 🕵️ Stealth Features
 
 ```
@@ -180,10 +182,10 @@ Professional SOC-grade web interface with live updates:
 - **Host Detail** — Drill-down view per IP (ports, vulns, anomalies, TLS)
 - **Vulnerabilities** — Nuclei findings sorted by severity with search & filters
 - **Anomalies** — ML-detected deviations with confidence scores
-- **Red Team** — Exploitable targets grouped by attack vector (RCE, auth bypass, default creds...)
+- **Red Team** — Exploitable targets plus crown-jewel targets, credential reuse clusters, and pivot-ranked footholds
 - **Scan Controls** — One-click scan triggers, custom DNS discovery, scheduling, profiles, webhooks
 - **Network Map** — Interactive vis.js topology graph colored by risk
-- **Attack Paths** — MITRE-mapped attack chains with risk scoring
+- **Attack Paths** — MITRE-mapped attack chains, crown-jewel targets, and ranked pivot paths with risk scoring
 - **MITRE ATT&CK Heatmap** — Visual coverage of tested techniques across 14 tactics
 - **Diff View** — What changed since last scan cycle (new hosts, ports, vulns)
 - **Notes** — Engagement journal for tracking findings and decisions
@@ -271,6 +273,8 @@ Open **http://localhost:5000** (already running with daemon) and check:
 - 🔓 Services with no authentication (Redis, Docker, ES)
 - 🔑 SMB null sessions & signing disabled (relay attacks)
 - 📜 Expired/self-signed certificates
+- 👑 Crown-jewel targets and high-value pivot footholds
+- 🔁 Credential reuse clusters that widen lateral reach
 - 🤖 ML anomalies (new hosts, unusual ports, banner changes)
 
 ### Phase 3: Targeted Exploitation
@@ -281,6 +285,7 @@ python run.py nuclei
 ```
 
 Or use the dashboard button. Nuclei runs rate-limited with stealth settings against targets flagged by the ML engine.
+The dashboard also exposes `GET /api/export/pivot-paths` for ranked footholds, crown jewels, pivot chains, and credential clusters as JSON.
 
 ### Phase 4: Report & Export
 
@@ -289,6 +294,8 @@ python run.py export --format json     # Machine-readable
 python run.py export --format report   # Markdown for clients
 python run.py export --format csv      # Spreadsheet-friendly
 ```
+
+For operator workflows, `GET /api/export/pivot-paths` returns the ranked footholds, crown jewels, pivot chains, and credential clusters as JSON.
 
 ### OpSec Checklist
 
@@ -398,6 +405,8 @@ python run.py import data.json --mode replace
 # ─── Analysis Tools ──────────────────────────────
 python run.py diff --hours 24          # What changed in last 24h
 python run.py init                     # Interactive config wizard
+python run.py init --fresh             # Reset DB/logs/scans/reports and rebuild a clean DB
+python run.py init --fresh --force     # Skip confirmation for the fresh reset
 
 # ─── Status ──────────────────────────────────────
 python run.py status
@@ -407,6 +416,8 @@ python run.py status --json
 python run.py -c custom_config.yaml daemon   # Custom config
 python run.py -v full                        # Verbose (reduces stealth)
 ```
+
+`python run.py init --fresh` also clears Python bytecode caches (`__pycache__`, `*.pyc`, `*.pyo`) before recreating the database.
 
 ---
 

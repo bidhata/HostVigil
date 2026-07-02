@@ -13,12 +13,9 @@ import subprocess
 import json
 import logging
 import sqlite3
-import time
 import os
 import tempfile
 from typing import List, Dict, Optional
-from pathlib import Path
-from datetime import datetime, timezone
 
 logger = logging.getLogger('hostvigil.nuclei')
 

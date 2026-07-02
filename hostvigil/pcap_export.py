@@ -8,15 +8,14 @@ Requires scapy for packet capture. Falls back gracefully if unavailable.
 """
 
 import logging
-import struct
 import time
 import threading
 from pathlib import Path
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime
 
 try:
-    from scapy.all import sniff as scapy_sniff, wrpcap, Packet
+    from scapy.all import sniff as scapy_sniff, wrpcap
     SCAPY_AVAILABLE = True
 except ImportError:
     SCAPY_AVAILABLE = False
@@ -191,7 +190,6 @@ class PcapExporter:
 
     def cleanup_old_captures(self, max_age_days: int = 7, max_total_mb: int = 500):
         """Remove old PCAP files to manage disk space."""
-        import os
         cutoff = time.time() - (max_age_days * 86400)
         total_size = 0
         files_by_age = []

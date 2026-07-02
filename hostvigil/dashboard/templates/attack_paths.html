@@ -227,6 +227,14 @@
         <div class="stat-num" id="stat-chains">0</div>
         <div class="stat-label">Attack Chains</div>
     </div>
+    <div class="stat-card red">
+        <div class="stat-num" id="stat-crown">0</div>
+        <div class="stat-label">Crown Jewels</div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-num" id="stat-creds">0</div>
+        <div class="stat-label">Cred Clusters</div>
+    </div>
 </div>
 
 <!-- Graph -->
@@ -289,6 +297,90 @@
         <p>No initial access vectors found.</p>
     </div>
 </div>
+
+<!-- Best Footholds -->
+<h6 class="section-header"><i class="bi bi-bullseye me-2"></i>Best Footholds</h6>
+<div id="foothold-container">
+    <table class="chain-table" id="foothold-table" style="display:none;">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Host</th>
+                <th>Value</th>
+                <th>Why It Matters</th>
+                <th>Tags</th>
+            </tr>
+        </thead>
+        <tbody id="foothold-tbody"></tbody>
+    </table>
+    <div class="no-data-msg" id="foothold-empty">
+        <i class="bi bi-compass"></i>
+        <p>No high-value footholds identified.</p>
+    </div>
+</div>
+
+<!-- Crown Jewels -->
+<h6 class="section-header"><i class="bi bi-gem me-2"></i>Crown Jewels</h6>
+<div id="crown-container">
+    <table class="chain-table" id="crown-table" style="display:none;">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Host</th>
+                <th>Value</th>
+                <th>Why It Matters</th>
+                <th>Tags</th>
+            </tr>
+        </thead>
+        <tbody id="crown-tbody"></tbody>
+    </table>
+    <div class="no-data-msg" id="crown-empty">
+        <i class="bi bi-shield-lock"></i>
+        <p>No crown jewel targets identified.</p>
+    </div>
+</div>
+
+<!-- Credential Clusters -->
+<h6 class="section-header"><i class="bi bi-arrow-repeat me-2"></i>Credential Clusters</h6>
+<div id="creds-container">
+    <table class="chain-table" id="creds-table" style="display:none;">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Label</th>
+                <th>Hosts</th>
+                <th>Service</th>
+            </tr>
+        </thead>
+        <tbody id="creds-tbody"></tbody>
+    </table>
+    <div class="no-data-msg" id="creds-empty">
+        <i class="bi bi-key"></i>
+        <p>No credential reuse clusters identified.</p>
+    </div>
+</div>
+
+<!-- Best Pivot Paths -->
+<h6 class="section-header"><i class="bi bi-signpost-split me-2"></i>Best Pivot Paths</h6>
+<div id="pivot-container">
+    <table class="chain-table" id="pivot-table" style="display:none;">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Score</th>
+                <th>Foothold</th>
+                <th>Pivot Target</th>
+                <th>Lateral Method</th>
+                <th>Objective</th>
+            </tr>
+        </thead>
+        <tbody id="pivot-tbody"></tbody>
+    </table>
+    <div class="no-data-msg" id="pivot-empty">
+        <i class="bi bi-arrow-right-circle"></i>
+        <p>No prioritized pivot paths identified.</p>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -305,6 +397,10 @@
                 renderGraph(data.graph);
                 renderChains(data.attack_chains);
                 renderInitialAccess(data.initial_access);
+                renderFootholds(data.best_footholds || []);
+                renderCrownJewels(data.crown_jewels || []);
+                renderCredentialClusters(data.credential_clusters || []);
+                renderPivotPaths(data.pivot_paths || []);
             })
             .catch(err => {
                 document.getElementById('graph-loading').innerHTML =
@@ -334,6 +430,8 @@
         document.getElementById('stat-lateral').textContent = data.lateral_movement.length;
         document.getElementById('stat-privesc').textContent = data.privilege_escalation.length;
         document.getElementById('stat-chains').textContent = data.attack_chains.length;
+        document.getElementById('stat-crown').textContent = (data.crown_jewels || []).length;
+        document.getElementById('stat-creds').textContent = (data.credential_clusters || []).length;
     }
 
     function renderGraph(graph) {
@@ -414,6 +512,85 @@
             row.innerHTML = `<td><code>${escapeHtml(v.host_ip)}</code>${v.port ? ':' + v.port : ''}</td><td>${escapeHtml(v.technique)}</td><td><span class="mitre-tag">${escapeHtml(v.mitre)}</span></td><td><span class="severity-badge ${v.severity}">${v.severity}</span></td><td>${escapeHtml(v.gains)}</td>`;
             tbody.appendChild(row);
         });
+    }
+
+    function renderFootholds(footholds) {
+        const tbody = document.getElementById('foothold-tbody');
+        const table = document.getElementById('foothold-table');
+        const empty = document.getElementById('foothold-empty');
+
+        if (!footholds || footholds.length === 0) { table.style.display = 'none'; empty.style.display = 'block'; return; }
+
+        table.style.display = 'table'; empty.style.display = 'none'; tbody.innerHTML = '';
+
+        footholds.forEach((item, idx) => {
+            const row = document.createElement('tr');
+            const tags = (item.attack_tags || []).slice(0, 5).map(tag => `<span class="mitre-tag" style="margin-right:4px;">${escapeHtml(tag)}</span>`).join('');
+            const reasons = (item.reasons || []).slice(0, 3).map(r => escapeHtml(r)).join('<br>');
+            row.innerHTML = `<td>${idx + 1}</td><td><code>${escapeHtml(item.host_ip)}</code>${item.hostname ? ' <span class="text-muted">(' + escapeHtml(item.hostname) + ')</span>' : ''}</td><td><span class="severity-badge ${scoreClass(item.score)}">${item.score}/100</span></td><td>${reasons}</td><td>${tags || '<span class="text-muted">none</span>'}</td>`;
+            tbody.appendChild(row);
+        });
+    }
+
+    function renderCrownJewels(jewels) {
+        const tbody = document.getElementById('crown-tbody');
+        const table = document.getElementById('crown-table');
+        const empty = document.getElementById('crown-empty');
+
+        if (!jewels || jewels.length === 0) { table.style.display = 'none'; empty.style.display = 'block'; return; }
+
+        table.style.display = 'table'; empty.style.display = 'none'; tbody.innerHTML = '';
+
+        jewels.forEach((item, idx) => {
+            const row = document.createElement('tr');
+            const tags = (item.attack_tags || []).slice(0, 5).map(tag => `<span class="mitre-tag" style="margin-right:4px;">${escapeHtml(tag)}</span>`).join('');
+            const reasons = (item.reasons || []).slice(0, 3).map(r => escapeHtml(r)).join('<br>');
+            row.innerHTML = `<td>${idx + 1}</td><td><code>${escapeHtml(item.host_ip)}</code>${item.hostname ? ' <span class="text-muted">(' + escapeHtml(item.hostname) + ')</span>' : ''}</td><td><span class="severity-badge critical">${item.score}/100</span></td><td>${reasons}</td><td>${tags || '<span class="text-muted">none</span>'}</td>`;
+            tbody.appendChild(row);
+        });
+    }
+
+    function renderCredentialClusters(clusters) {
+        const tbody = document.getElementById('creds-tbody');
+        const table = document.getElementById('creds-table');
+        const empty = document.getElementById('creds-empty');
+
+        if (!clusters || clusters.length === 0) { table.style.display = 'none'; empty.style.display = 'block'; return; }
+
+        table.style.display = 'table'; empty.style.display = 'none'; tbody.innerHTML = '';
+
+        clusters.forEach((cluster, idx) => {
+            const row = document.createElement('tr');
+            const hosts = (cluster.hosts || []).slice(0, 5).map(host => `<span class="mitre-tag" style="margin-right:4px;">${escapeHtml(host)}</span>`).join('');
+            row.innerHTML = `<td>${idx + 1}</td><td>${escapeHtml(cluster.label || 'reused credential')}</td><td>${hosts || '<span class="text-muted">none</span>'}</td><td>${escapeHtml(cluster.service || 'multi-service')}</td>`;
+            tbody.appendChild(row);
+        });
+    }
+
+    function renderPivotPaths(paths) {
+        const tbody = document.getElementById('pivot-tbody');
+        const table = document.getElementById('pivot-table');
+        const empty = document.getElementById('pivot-empty');
+
+        if (!paths || paths.length === 0) { table.style.display = 'none'; empty.style.display = 'block'; return; }
+
+        table.style.display = 'table'; empty.style.display = 'none'; tbody.innerHTML = '';
+
+        paths.forEach((path, idx) => {
+            const row = document.createElement('tr');
+            const foothold = `${escapeHtml(path.foothold.host)}${path.foothold.mitre ? ' <span class="mitre-tag">' + escapeHtml(path.foothold.mitre) + '</span>' : ''}`;
+            const pivotReasons = (path.pivot.reasons || []).slice(0, 2).map(r => escapeHtml(r)).join('<br>');
+            const method = `${escapeHtml(path.lateral.method)}${path.lateral.port ? ':' + path.lateral.port : ''}<br><span class="text-muted">${escapeHtml(path.lateral.technique || '')}</span>`;
+            row.innerHTML = `<td>${idx + 1}</td><td><span class="severity-badge ${scoreClass(path.score)}">${path.score}/100</span></td><td>${foothold}<br><span class="text-muted">${escapeHtml(path.foothold.technique || '')}</span></td><td><code>${escapeHtml(path.pivot.host)}</code>${path.pivot.hostname ? ' <span class="text-muted">(' + escapeHtml(path.pivot.hostname) + ')</span>' : ''}<br>${pivotReasons}</td><td>${method}</td><td>${escapeHtml(path.objective || 'Unknown')}</td>`;
+            tbody.appendChild(row);
+        });
+    }
+
+    function scoreClass(score) {
+        if (score >= 75) return 'critical';
+        if (score >= 50) return 'high';
+        if (score >= 25) return 'medium';
+        return 'low';
     }
 
     function escapeHtml(text) {

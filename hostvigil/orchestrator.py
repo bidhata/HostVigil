@@ -10,7 +10,6 @@ daemon mode with configurable scheduling and stealth timing.
 
 import os
 import signal
-import sqlite3
 import logging
 import threading
 import random
@@ -775,7 +774,7 @@ class HostVigilOrchestrator:
 
         logger.info(f"Starting dashboard on {bind_host}:{bind_port}")
         print(f"[*] HostVigil Dashboard: http://{bind_host}:{bind_port}")
-        print(f"[*] Press Ctrl+C to stop")
+        print("[*] Press Ctrl+C to stop")
         app.run(host=bind_host, port=bind_port, debug=False, use_reloader=False)
 
     # ------------------------------------------------------------------

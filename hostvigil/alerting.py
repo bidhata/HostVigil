@@ -21,7 +21,7 @@ import sqlite3
 import urllib.request
 import urllib.error
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, List
 from datetime import datetime, timezone
 
 logger = logging.getLogger('hostvigil.alerting')

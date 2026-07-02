@@ -515,10 +515,8 @@ class StealthCredentialSpray:
             server_challenge = challenge_msg[24:32]
 
             # Build NTLMv1 response (simplified for detection of weak auth)
-            import hmac as _hmac
             password_bytes = password.encode('utf-16-le')
             # MD4 hash of password (NT hash)
-            from hashlib import md4  # noqa: F401 - available in Python hashlib
             try:
                 nt_hash = hashlib.new('md4', password_bytes).digest()
             except ValueError:

@@ -21,6 +21,57 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger('hostvigil.scanner.service_enum')
 
+ATTACK_TAG_RULES = {
+    'smb': {
+        'relay-risk': 'SMB relay path',
+        'pivot-node': 'SMB reachable pivot',
+        'lateral-movement': 'SMB lateral movement candidate',
+    },
+    'ldap': {
+        'domain-enum': 'LDAP domain enumeration',
+        'credential-harvest': 'LDAP context for account discovery',
+        'pivot-node': 'LDAP pivot node',
+    },
+    'ldaps': {
+        'domain-enum': 'LDAPS domain enumeration',
+        'credential-harvest': 'LDAPS context for account discovery',
+        'pivot-node': 'LDAPS pivot node',
+    },
+    'redis': {
+        'host-takeover': 'Redis unauthenticated access',
+        'pivot-node': 'Redis pivot node',
+        'credential-harvest': 'Redis key/value exposure',
+    },
+    'docker': {
+        'host-takeover': 'Docker API exposure',
+        'pivot-node': 'Docker pivot node',
+        'admin-plane': 'Container admin plane exposure',
+    },
+    'elasticsearch': {
+        'data-exposure': 'Elasticsearch data exposure',
+        'pivot-node': 'Elasticsearch pivot node',
+        'credential-harvest': 'Searchable internal data',
+    },
+    'winrm': {
+        'lateral-movement': 'WinRM lateral movement',
+        'admin-plane': 'Windows remote admin plane',
+    },
+    'ssh': {
+        'lateral-movement': 'SSH lateral movement',
+        'admin-plane': 'Remote admin plane',
+    },
+    'rdp': {
+        'lateral-movement': 'RDP lateral movement',
+        'admin-plane': 'Remote desktop admin plane',
+    },
+}
+
+ATTACK_SEVERITY_TAGS = {
+    'critical': {'host-takeover', 'pivot-node'},
+    'high': {'pivot-node', 'lateral-movement'},
+    'medium': {'lateral-movement'},
+}
+
 # SMB2 Constants
 SMB2_MAGIC = b'\xfeSMB'
 SMB1_MAGIC = b'\xffSMB'
@@ -1494,6 +1545,11 @@ class ServiceEnumerator:
                 return
 
             now = datetime.now(timezone.utc).isoformat()
+            attack_tags = self._derive_attack_tags(service_type, enum_data, findings, risk_level)
+            if attack_tags:
+                enum_data = dict(enum_data)
+                enum_data['attack_tags'] = sorted(attack_tags)
+                enum_data['attack_summary'] = self._attack_summary(service_type, attack_tags)
             details_text = json.dumps({
                 'enum_data': enum_data,
                 'findings': findings,
@@ -1528,11 +1584,102 @@ class ServiceEnumerator:
                 f"INSERT INTO service_enumeration ({', '.join(insert_cols)}) VALUES ({placeholders})",
                 tuple(payload[c] for c in insert_cols),
             )
+
+            if attack_tags:
+                host_tags = [
+                    ('pivot-node', 'Service exposure suggests pivot value') if tag == 'pivot-node' else
+                    ('relay-risk', 'Unsigned SMB or relay-prone service') if tag == 'relay-risk' else
+                    (tag, f'{service_type} red-team primitive')
+                    for tag in sorted(attack_tags)
+                ]
+                for tag, _reason in host_tags:
+                    try:
+                        conn.execute(
+                            'INSERT OR IGNORE INTO host_tags (host_id, tag, added_at) VALUES (?, ?, ?)',
+                            (host_id, tag, now),
+                        )
+                    except sqlite3.OperationalError:
+                        break
+
             conn.commit()
             conn.close()
             logger.debug(f"Stored {service_type} enumeration for {ip}:{port} [{risk_level}]")
         except Exception as e:
             logger.error(f"Failed to store result for {ip}:{port}: {e}")
+
+    def _derive_attack_tags(self, service_type: str, enum_data: Dict, findings: List[str], risk_level: str) -> set[str]:
+        """Convert service findings into red-team attack primitives."""
+        tags: set[str] = set()
+        normalized = (service_type or '').lower()
+        tag_rules = ATTACK_TAG_RULES.get(normalized, {})
+
+        for tag in tag_rules:
+            tags.add(tag)
+
+        if normalized == 'smb':
+            if enum_data.get('signing_required') is False:
+                tags.add('relay-risk')
+            if enum_data.get('null_session'):
+                tags.add('domain-enum')
+                tags.add('credential-harvest')
+        elif normalized in ('ldap', 'ldaps'):
+            if enum_data.get('anonymous_bind'):
+                tags.add('domain-enum')
+                tags.add('credential-harvest')
+        elif normalized == 'redis':
+            if enum_data.get('no_auth'):
+                tags.add('host-takeover')
+                tags.add('pivot-node')
+        elif normalized == 'docker':
+            if enum_data.get('no_auth'):
+                tags.add('host-takeover')
+                tags.add('admin-plane')
+        elif normalized == 'elasticsearch':
+            if enum_data.get('no_auth'):
+                tags.add('data-exposure')
+                tags.add('pivot-node')
+        elif normalized == 'winrm':
+            if enum_data.get('accessible'):
+                tags.add('lateral-movement')
+                tags.add('admin-plane')
+        elif normalized == 'ssh':
+            tags.add('lateral-movement')
+
+        if risk_level in ATTACK_SEVERITY_TAGS:
+            tags.update(ATTACK_SEVERITY_TAGS[risk_level])
+
+        for finding in findings or []:
+            text = str(finding).lower()
+            if 'relay' in text:
+                tags.add('relay-risk')
+            if 'null session' in text or 'anonymous ldap bind' in text:
+                tags.add('domain-enum')
+            if 'unauthenticated' in text or 'without authentication' in text:
+                tags.add('host-takeover')
+            if 'admin' in text or 'privilege' in text:
+                tags.add('admin-plane')
+
+        return tags
+
+    def _attack_summary(self, service_type: str, tags: set[str]) -> str:
+        """Generate a short red-team oriented summary for a service."""
+        service_label = (service_type or 'service').upper()
+        focus = []
+        if 'host-takeover' in tags:
+            focus.append('host takeover')
+        if 'relay-risk' in tags:
+            focus.append('relay risk')
+        if 'domain-enum' in tags:
+            focus.append('domain enumeration')
+        if 'lateral-movement' in tags:
+            focus.append('lateral movement')
+        if 'data-exposure' in tags:
+            focus.append('data exposure')
+        if 'admin-plane' in tags:
+            focus.append('admin plane access')
+        if not focus:
+            focus.append('pivot value')
+        return f"{service_label}: {', '.join(focus)}"
 
     def _apply_jitter(self, base_delay: float) -> float:
         """Apply randomized jitter to a delay value."""

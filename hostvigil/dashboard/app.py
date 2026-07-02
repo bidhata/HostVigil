@@ -360,6 +360,8 @@ def create_app(config: dict = None):
     @login_required
     def redteam():
         """Red team view - exploitable targets grouped by attack vector."""
+        from hostvigil.attack_paths import AttackPathEngine
+
         # Get verified and high/critical vulns with exploit potential
         exploitable = query_db("""
             SELECT
@@ -386,10 +388,44 @@ def create_app(config: dict = None):
                 ELSE 3 END, v.matched_at DESC
         """)
 
+        service_primitives = query_db("""
+            SELECT
+                se.id,
+                se.ip,
+                se.port,
+                se.service_type,
+                se.risk_level,
+                se.title,
+                se.finding_type,
+                se.discovered_at,
+                h.hostname,
+                se.enum_data
+            FROM service_enumeration se
+            JOIN hosts h ON h.id = se.host_id
+            ORDER BY CASE LOWER(COALESCE(se.risk_level, se.severity, 'info'))
+                WHEN 'critical' THEN 1
+                WHEN 'high' THEN 2
+                WHEN 'medium' THEN 3
+                WHEN 'low' THEN 4
+                ELSE 5 END,
+                se.discovered_at DESC
+        """)
+
         # Categorize by attack vector based on template_id and name patterns
         categories = _categorize_exploits(exploitable)
 
-        return render_template("redteam.html", categories=categories)
+        primitive_categories = _categorize_primitives(service_primitives)
+        attack_analysis = AttackPathEngine(app.config['DB_PATH']).analyze()
+
+        return render_template(
+            "redteam.html",
+            crown_jewels=attack_analysis.get('crown_jewels', []),
+            credential_clusters=attack_analysis.get('credential_clusters', []),
+            categories=categories,
+            primitive_categories=primitive_categories,
+            best_footholds=attack_analysis.get('best_footholds', []),
+            pivot_paths=attack_analysis.get('pivot_paths', []),
+        )
 
     # -------------------------------------------------------------------
     # API Endpoints (JSON)
@@ -619,6 +655,8 @@ def create_app(config: dict = None):
     @app.route("/api/redteam")
     def api_redteam():
         """API: Get exploitable targets grouped by attack vector."""
+        from hostvigil.attack_paths import AttackPathEngine
+
         exploitable = query_db("""
             SELECT
                 v.id,
@@ -640,8 +678,41 @@ def create_app(config: dict = None):
             WHERE LOWER(v.severity) IN ('critical', 'high')
             ORDER BY v.matched_at DESC
         """)
+        service_primitives = query_db("""
+            SELECT
+                se.id,
+                se.ip,
+                se.port,
+                se.service_type,
+                se.risk_level,
+                se.title,
+                se.finding_type,
+                se.discovered_at,
+                h.hostname,
+                se.enum_data
+            FROM service_enumeration se
+            JOIN hosts h ON h.id = se.host_id
+            ORDER BY CASE LOWER(COALESCE(se.risk_level, se.severity, 'info'))
+                WHEN 'critical' THEN 1
+                WHEN 'high' THEN 2
+                WHEN 'medium' THEN 3
+                WHEN 'low' THEN 4
+                ELSE 5 END,
+                se.discovered_at DESC
+        """)
         categories = _categorize_exploits(exploitable)
-        return jsonify({"categories": categories})
+        primitive_categories = _categorize_primitives(service_primitives)
+        attack_analysis = AttackPathEngine(app.config['DB_PATH']).analyze()
+        return jsonify({
+            "categories": categories,
+            "primitive_categories": primitive_categories,
+            "best_footholds": attack_analysis.get('best_footholds', []),
+            "crown_jewels": attack_analysis.get('crown_jewels', []),
+            "credential_clusters": attack_analysis.get('credential_clusters', []),
+            "pivot_paths": attack_analysis.get('pivot_paths', []),
+            "risk_score": attack_analysis.get('risk_score', 0),
+            "summary": attack_analysis.get('summary', ''),
+        })
 
     # -------------------------------------------------------------------
     # Scan Trigger API Endpoints
@@ -1204,8 +1275,6 @@ def create_app(config: dict = None):
 
         def _run_dns_discovery():
             import socket
-            import sqlite3
-            from datetime import datetime, timezone
 
             app._scan_running = True
             app._scan_status = {"type": "dns_discovery", "status": "running", "started": _now_iso()}
@@ -1535,6 +1604,20 @@ def create_app(config: dict = None):
         c2 = C2Exporter(app.config['DB_PATH'])
         results = c2.export_all()
         return jsonify(results)
+
+    @app.route('/api/export/pivot-paths')
+    def api_export_pivot_paths():
+        """API: Export ranked pivot targets and paths for operator workflow."""
+        from hostvigil.attack_paths import AttackPathEngine
+        analysis = AttackPathEngine(app.config['DB_PATH']).analyze()
+        return jsonify({
+            'best_footholds': analysis.get('best_footholds', []),
+            'crown_jewels': analysis.get('crown_jewels', []),
+            'pivot_paths': analysis.get('pivot_paths', []),
+            'credential_clusters': analysis.get('credential_clusters', []),
+            'risk_score': analysis.get('risk_score', 0),
+            'summary': analysis.get('summary', ''),
+        })
 
     @app.route('/api/export/pdf_report')
     def api_export_pdf_report():
@@ -1903,20 +1986,20 @@ def create_app(config: dict = None):
 
             # Markdown report
             stats = _get_stats()
-            md = f"# HostVigil Report\n\n"
+            md = "# HostVigil Report\n\n"
             md += f"**Generated:** {_now_iso()}\n\n"
-            md += f"## Summary\n\n"
+            md += "## Summary\n\n"
             md += f"- **Total Hosts:** {stats['total_hosts']}\n"
             md += f"- **Total Ports:** {stats['total_ports']}\n"
             md += f"- **Critical Vulns:** {stats['vulnerabilities']['critical']}\n"
             md += f"- **High Vulns:** {stats['vulnerabilities']['high']}\n"
             md += f"- **Active Anomalies:** {stats['active_anomalies']}\n\n"
-            md += f"## Hosts\n\n"
+            md += "## Hosts\n\n"
             for h in hosts[:50]:
                 md += f"- {h.get('ip', '?')} ({h.get('hostname') or 'unknown'})\n"
             if len(hosts) > 50:
                 md += f"\n... and {len(hosts) - 50} more\n"
-            md += f"\n## Vulnerabilities\n\n"
+            md += "\n## Vulnerabilities\n\n"
             for v in vulns[:50]:
                 md += f"- [{v.get('severity', '?').upper()}] {v.get('name', '?')} on {v.get('ip', '?')}\n"
             zf.writestr("report.md", md)
@@ -2017,6 +2100,53 @@ def create_app(config: dict = None):
                 categories["other"]["items"].append(vuln)
 
         # Remove empty categories
+        return {k: v for k, v in categories.items() if v["items"]}
+
+    def _categorize_primitives(primitives: list) -> dict:
+        """Categorize service enumeration results by red-team primitive."""
+        categories = {
+            "host_takeover": {"label": "Host Takeover", "icon": "💥", "items": []},
+            "relay_risk": {"label": "Relay Risk", "icon": "🔁", "items": []},
+            "pivot_node": {"label": "Pivot Node", "icon": "🧭", "items": []},
+            "domain_enum": {"label": "Domain Enumeration", "icon": "🗂️", "items": []},
+            "lateral_movement": {"label": "Lateral Movement", "icon": "↔️", "items": []},
+            "data_exposure": {"label": "Data Exposure", "icon": "🗃️", "items": []},
+            "admin_plane": {"label": "Admin Plane", "icon": "⚙️", "items": []},
+            "other": {"label": "Other Primitives", "icon": "⚡", "items": []},
+        }
+
+        for primitive in primitives:
+            enum_data = primitive.get("enum_data")
+            if isinstance(enum_data, str):
+                try:
+                    enum_data = json.loads(enum_data)
+                except Exception:
+                    enum_data = {}
+            attack_tags = set((enum_data or {}).get("attack_tags", []))
+            if not attack_tags:
+                risk = (primitive.get("risk_level") or "").lower()
+                if risk == 'critical':
+                    attack_tags.update(['host_takeover', 'pivot_node'])
+                elif risk == 'high':
+                    attack_tags.update(['pivot_node', 'lateral_movement'])
+
+            if 'host-takeover' in attack_tags:
+                categories['host_takeover']['items'].append(primitive)
+            elif 'relay-risk' in attack_tags:
+                categories['relay_risk']['items'].append(primitive)
+            elif 'pivot-node' in attack_tags:
+                categories['pivot_node']['items'].append(primitive)
+            elif 'domain-enum' in attack_tags or 'credential-harvest' in attack_tags:
+                categories['domain_enum']['items'].append(primitive)
+            elif 'lateral-movement' in attack_tags:
+                categories['lateral_movement']['items'].append(primitive)
+            elif 'data-exposure' in attack_tags:
+                categories['data_exposure']['items'].append(primitive)
+            elif 'admin-plane' in attack_tags:
+                categories['admin_plane']['items'].append(primitive)
+            else:
+                categories['other']['items'].append(primitive)
+
         return {k: v for k, v in categories.items() if v["items"]}
 
     # ===================================================================

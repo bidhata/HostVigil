@@ -11,9 +11,7 @@ Output includes a vis.js-compatible graph for dashboard visualization.
 import sqlite3
 import json
 import logging
-from typing import Dict, List, Optional, Set, Tuple
-from pathlib import Path
-from datetime import datetime, timezone
+from typing import Dict, List, Optional, Set
 
 logger = logging.getLogger('hostvigil.attack_paths')
 
@@ -147,6 +145,9 @@ class AttackPathEngine:
                 'lateral_movement': [...],
                 'privilege_escalation': [...],
                 'attack_chains': [...],
+                'pivot_targets': [...],
+                'pivot_paths': [...],
+                'best_footholds': [...],
                 'graph': {'nodes': [...], 'edges': [...]},
                 'risk_score': float,
                 'summary': str,
@@ -163,6 +164,8 @@ class AttackPathEngine:
             initial_access = self._find_initial_access(conn, findings)
             lateral_paths = self._find_lateral_movement(conn, findings)
             priv_esc = self._find_privilege_escalation(conn, findings)
+            pivot_targets = self._rank_pivot_targets(findings, initial_access, lateral_paths, priv_esc)
+            pivot_paths = self._build_pivot_paths(initial_access, lateral_paths, priv_esc, pivot_targets)
 
             # Build chains (initial → lateral → priv esc)
             chains = self._build_attack_chains(initial_access, lateral_paths, priv_esc)
@@ -180,9 +183,14 @@ class AttackPathEngine:
             'lateral_movement': lateral_paths,
             'privilege_escalation': priv_esc,
             'attack_chains': chains,
+            'pivot_targets': pivot_targets,
+            'pivot_paths': pivot_paths,
+            'best_footholds': pivot_targets[:5],
+            'crown_jewels': [item for item in pivot_targets if item.get('is_crown_jewel')][:5],
+            'credential_clusters': findings.get('credential_clusters', []),
             'graph': graph,
             'risk_score': risk_score,
-            'summary': self._generate_summary(initial_access, lateral_paths, priv_esc, chains, risk_score),
+            'summary': self._generate_summary(initial_access, lateral_paths, priv_esc, chains, risk_score, pivot_targets, pivot_paths),
         }
 
     def _gather_findings(self, conn) -> Dict:
@@ -195,6 +203,8 @@ class AttackPathEngine:
             'creds': [],
             'enum': [],
             'tls': [],
+            'host_tags': [],
+            'credential_clusters': [],
         }
 
         findings['hosts'] = [dict(r) for r in conn.execute(
@@ -227,6 +237,8 @@ class AttackPathEngine:
         except Exception as e:
             logger.warning("Failed to load credential_results findings: %s", e)
 
+        findings['credential_clusters'] = self._build_credential_clusters(findings.get('creds', []))
+
         # TLS findings
         try:
             findings['tls'] = [dict(r) for r in conn.execute(
@@ -234,6 +246,14 @@ class AttackPathEngine:
             ).fetchall()]
         except Exception as e:
             logger.warning("Failed to load tls_certificates findings: %s", e)
+
+        try:
+            findings['host_tags'] = [dict(r) for r in conn.execute(
+                'SELECT ht.host_id, ht.tag, ht.added_at, h.ip, h.hostname '
+                'FROM host_tags ht JOIN hosts h ON h.id = ht.host_id'
+            ).fetchall()]
+        except Exception as e:
+            logger.warning("Failed to load host_tags findings: %s", e)
 
         return findings
 
@@ -425,6 +445,253 @@ class AttackPathEngine:
 
         return priv_esc
 
+    def _rank_pivot_targets(self, findings: Dict, initial: List, lateral: List, priv_esc: List) -> List[Dict]:
+        """Rank hosts by offensive value: foothold quality, chainability, and blast radius."""
+        host_index = {}
+        for host in findings.get('hosts', []):
+            host_index[host.get('ip', '')] = dict(host)
+
+        host_scores = {}
+
+        def ensure_host(ip: str) -> Dict:
+            if ip not in host_scores:
+                host_scores[ip] = {
+                    'host_ip': ip,
+                    'hostname': host_index.get(ip, {}).get('hostname'),
+                    'score': 0,
+                    'reasons': [],
+                    'initial_access': [],
+                    'lateral_targets': set(),
+                    'attack_tags': set(),
+                }
+            return host_scores[ip]
+
+        def add_reason(entry: Dict, points: int, reason: str):
+            entry['score'] += points
+            if reason not in entry['reasons']:
+                entry['reasons'].append(reason)
+
+        # Seed with service enumeration tags and host tags.
+        for tag_row in findings.get('host_tags', []):
+            ip = tag_row.get('ip', '')
+            tag = (tag_row.get('tag') or '').lower().replace('_', '-')
+            entry = ensure_host(ip)
+            entry['attack_tags'].add(tag)
+            if tag in ('crown-jewel', 'crown jewel', 'crownjewel'):
+                entry['attack_tags'].add('crown-jewel')
+                add_reason(entry, 30, 'explicit crown jewel tag')
+            if tag in ('host-takeover', 'relay-risk'):
+                add_reason(entry, 22, f"{tag} service exposure")
+            elif tag in ('pivot-node', 'lateral-movement'):
+                add_reason(entry, 12, f"{tag} movement path")
+            elif tag in ('domain-enum', 'credential-harvest', 'admin-plane', 'data-exposure'):
+                add_reason(entry, 8, f"{tag} intelligence")
+
+        for cluster in findings.get('credential_clusters', []):
+            host_ips = cluster.get('hosts', []) or []
+            if len(host_ips) < 2:
+                continue
+            reuse_score = min(20 + (len(host_ips) - 2) * 4, 32)
+            reason = cluster.get('label') or 'reused credential set'
+            for ip in host_ips:
+                entry = ensure_host(ip)
+                entry['attack_tags'].add('credential-reuse')
+                add_reason(entry, reuse_score, reason)
+
+        for enum in findings.get('enum', []):
+            ip = enum.get('ip', '')
+            entry = ensure_host(ip)
+            data = {}
+            try:
+                data = json.loads(enum.get('enum_data', '{}') or '{}')
+            except (json.JSONDecodeError, TypeError):
+                data = {}
+
+            service_type = (enum.get('service_type') or '').lower()
+            risk = (enum.get('risk_level') or enum.get('severity') or 'info').lower()
+            if risk == 'critical':
+                add_reason(entry, 18, f"critical {service_type} exposure")
+            elif risk == 'high':
+                add_reason(entry, 10, f"high {service_type} exposure")
+            elif risk == 'medium':
+                add_reason(entry, 4, f"medium {service_type} exposure")
+
+            if 'attack_tags' in data:
+                for tag in data.get('attack_tags', []):
+                    tag = str(tag).lower().replace('_', '-')
+                    entry['attack_tags'].add(tag)
+                    if tag == 'crown-jewel':
+                        add_reason(entry, 24, f"{service_type} crown jewel adjacency")
+                    if tag == 'host-takeover':
+                        add_reason(entry, 18, f"{service_type} takeover path")
+                    elif tag == 'relay-risk':
+                        add_reason(entry, 16, f"{service_type} relay risk")
+                    elif tag == 'pivot-node':
+                        add_reason(entry, 12, f"{service_type} pivot node")
+                    elif tag == 'lateral-movement':
+                        add_reason(entry, 10, f"{service_type} lateral movement")
+                    elif tag in ('domain-enum', 'credential-harvest', 'admin-plane', 'data-exposure'):
+                        add_reason(entry, 6, f"{service_type} {tag}")
+
+            if service_type in ('smb', 'ldap', 'ldaps', 'redis', 'elasticsearch', 'docker', 'winrm', 'ssh', 'rdp'):
+                entry['attack_tags'].add(service_type)
+
+        for ia in initial:
+            ip = ia.get('host_ip', '')
+            entry = ensure_host(ip)
+            entry['initial_access'].append(ia)
+            severity = (ia.get('severity') or 'info').lower()
+            if severity == 'critical':
+                add_reason(entry, 28, f"initial access: {ia.get('technique', 'unknown')}")
+            elif severity == 'high':
+                add_reason(entry, 18, f"initial access: {ia.get('technique', 'unknown')}")
+            elif severity == 'medium':
+                add_reason(entry, 8, f"initial access: {ia.get('technique', 'unknown')}")
+
+        for lm in lateral:
+            ip = lm.get('to', '')
+            entry = ensure_host(ip)
+            entry['lateral_targets'].add(lm.get('method', ''))
+            add_reason(entry, 6, f"reachable via {lm.get('method', 'lateral movement')}")
+
+        for pe in priv_esc:
+            if pe.get('severity') == 'critical':
+                for host in host_scores.values():
+                    add_reason(host, 8, f"priv esc path: {pe.get('technique', 'unknown')}")
+            elif pe.get('severity') == 'high':
+                for host in host_scores.values():
+                    add_reason(host, 4, f"priv esc path: {pe.get('technique', 'unknown')}")
+
+        for ip, entry in host_scores.items():
+            open_ports = [p for p in findings.get('ports', []) if p.get('ip') == ip and p.get('state') == 'open']
+            sensitive_ports = {22, 23, 25, 53, 80, 88, 135, 139, 389, 443, 445, 636, 1433, 1521, 2375, 2376, 3306, 3389, 5432, 5985, 5986, 6379, 8080, 8443, 9200, 9300, 27017}
+            port_bonus = sum(3 for p in open_ports if int(p.get('port') or 0) in sensitive_ports)
+            add_reason(entry, min(port_bonus, 18), 'sensitive services exposed')
+
+            if len(open_ports) >= 8:
+                add_reason(entry, 6, 'wide service surface')
+            if len(entry['lateral_targets']) >= 3:
+                add_reason(entry, 8, 'multi-target lateral reach')
+            if 'relay-risk' in entry['attack_tags'] and 'pivot-node' in entry['attack_tags']:
+                add_reason(entry, 10, 'relay-to-pivot combination')
+            if 'credential-reuse' in entry['attack_tags']:
+                add_reason(entry, 6, 'credential reuse cluster')
+            if 'crown-jewel' in entry['attack_tags']:
+                add_reason(entry, 12, 'explicit crown jewel target')
+
+        ranked = []
+        for entry in host_scores.values():
+            score = min(100, entry['score'])
+            if score <= 0:
+                continue
+            ranked.append({
+                'host_ip': entry['host_ip'],
+                'hostname': entry['hostname'],
+                'score': score,
+                'rank_label': self._pivot_label(score, entry['attack_tags']),
+                'reasons': entry['reasons'][:6],
+                'attack_tags': sorted(entry['attack_tags']),
+                'initial_access_count': len(entry['initial_access']),
+                'lateral_target_count': len(entry['lateral_targets']),
+                'is_crown_jewel': 'crown-jewel' in entry['attack_tags'],
+            })
+
+        ranked.sort(key=lambda item: (-item['score'], -item['initial_access_count'], -item['lateral_target_count'], item['host_ip']))
+        return ranked
+
+    def _build_pivot_paths(self, initial: List, lateral: List, priv_esc: List, pivot_targets: List[Dict]) -> List[Dict]:
+        """Build the best offensive pivot paths from foothold to downstream objective."""
+        target_scores = {p['host_ip']: p for p in pivot_targets}
+        paths = []
+
+        lateral_by_target = {}
+        for lm in lateral:
+            lateral_by_target.setdefault(lm.get('to', ''), []).append(lm)
+
+        for ia in initial:
+            for target_ip, lm_list in lateral_by_target.items():
+                if target_ip == ia.get('host_ip'):
+                    continue
+                target = target_scores.get(target_ip)
+                if not target:
+                    continue
+
+                for lm in lm_list:
+                    path_score = self._chain_score(ia, lm, target, priv_esc)
+                    paths.append({
+                        'score': path_score,
+                        'foothold': {
+                            'host': ia.get('host_ip'),
+                            'technique': ia.get('technique'),
+                            'mitre': ia.get('mitre'),
+                            'severity': ia.get('severity'),
+                        },
+                        'pivot': {
+                            'host': target_ip,
+                            'hostname': target.get('hostname'),
+                            'score': target.get('score', 0),
+                            'reasons': target.get('reasons', []),
+                            'attack_tags': target.get('attack_tags', []),
+                            'is_crown_jewel': target.get('is_crown_jewel', False),
+                        },
+                        'lateral': {
+                            'method': lm.get('method'),
+                            'port': lm.get('port'),
+                            'technique': lm.get('technique'),
+                            'mitre': lm.get('mitre'),
+                        },
+                        'objective': priv_esc[0]['gains'] if priv_esc else 'Unknown',
+                    })
+
+        paths.sort(key=lambda item: (-item['score'], item['foothold']['host'], item['pivot']['host']))
+        return paths[:3]
+
+    def _chain_score(self, ia: Dict, lm: Dict, pivot: Dict, priv_esc: List[Dict]) -> int:
+        """Score a chain by foothold quality, pivot value, and objective proximity."""
+        score = 0
+        sev = (ia.get('severity') or 'info').lower()
+        if sev == 'critical':
+            score += 30
+        elif sev == 'high':
+            score += 20
+        elif sev == 'medium':
+            score += 10
+
+        score += min(int(pivot.get('score') or 0), 100) // 2
+
+        if lm.get('method') in ('SMB Relay', 'WinRM', 'RDP'):
+            score += 8
+        elif lm.get('method') == 'SSH':
+            score += 5
+
+        if priv_esc:
+            best = priv_esc[0]
+            if best.get('severity') == 'critical':
+                score += 20
+            elif best.get('severity') == 'high':
+                score += 12
+
+        if 'relay-risk' in pivot.get('attack_tags', []):
+            score += 8
+        if 'admin-plane' in pivot.get('attack_tags', []):
+            score += 6
+        if pivot.get('is_crown_jewel'):
+            score += 20
+
+        return min(score, 100)
+
+    @staticmethod
+    def _pivot_label(score: int, attack_tags: Optional[Set[str]] = None) -> str:
+        if attack_tags and 'crown-jewel' in attack_tags:
+            return 'CROWN JEWEL'
+        if score >= 75:
+            return 'HIGH VALUE FOOTHOLD'
+        if score >= 50:
+            return 'STRONG PIVOT'
+        if score >= 25:
+            return 'USEFUL PIVOT'
+        return 'WEAK PIVOT'
+
     def _build_attack_chains(self, initial: List, lateral: List, priv_esc: List) -> List[Dict]:
         """Build end-to-end attack chains from initial access to objective."""
         chains = []
@@ -602,7 +869,7 @@ class AttackPathEngine:
 
         return min(100.0, score)
 
-    def _generate_summary(self, initial, lateral, priv_esc, chains, risk_score) -> str:
+    def _generate_summary(self, initial, lateral, priv_esc, chains, risk_score, pivot_targets=None, pivot_paths=None) -> str:
         """Generate a human-readable summary."""
         parts = [f"Risk Score: {risk_score:.0f}/100"]
 
@@ -616,6 +883,14 @@ class AttackPathEngine:
         if chains:
             parts.append(f"{len(chains)} complete attack chain(s) from initial access to objective")
 
+        if pivot_targets:
+            parts.append(f"Top foothold: {pivot_targets[0]['host_ip']} ({pivot_targets[0]['score']}/100)")
+            crown_jewel_count = sum(1 for item in pivot_targets if item.get('is_crown_jewel'))
+            if crown_jewel_count:
+                parts.append(f"{crown_jewel_count} crown jewel target(s) mapped")
+        if pivot_paths:
+            parts.append(f"{len(pivot_paths)} best pivot path(s) prioritized")
+
         if risk_score >= 75:
             parts.append("CRITICAL: Multiple high-confidence paths to domain compromise exist.")
         elif risk_score >= 50:
@@ -626,3 +901,50 @@ class AttackPathEngine:
             parts.append("LOW: Limited attack surface detected.")
 
         return ' | '.join(parts)
+
+    def _build_credential_clusters(self, creds: List[Dict]) -> List[Dict]:
+        """Group successful credentials by reuse pattern for offensive prioritization."""
+        clusters = {}
+
+        for cred in creds or []:
+            username = (cred.get('username') or '').strip().lower()
+            service = (cred.get('service') or '').strip().lower()
+            credential_hash = (cred.get('credential_hash') or '').strip().lower()
+            host_ip = cred.get('ip', '')
+
+            primary_key = credential_hash or f"{username}|{service}"
+            if not primary_key:
+                continue
+
+            cluster = clusters.setdefault(primary_key, {
+                'username': username,
+                'service': service,
+                'credential_hash': credential_hash or None,
+                'hosts': set(),
+            })
+            if host_ip:
+                cluster['hosts'].add(host_ip)
+
+        results = []
+        for key, cluster in clusters.items():
+            hosts = sorted(cluster['hosts'])
+            if len(hosts) < 2:
+                continue
+            label_bits = []
+            if cluster['username']:
+                label_bits.append(cluster['username'])
+            if cluster['service']:
+                label_bits.append(cluster['service'])
+            if not label_bits:
+                label_bits.append(key[:12])
+            results.append({
+                'label': f"Reused credential: {'/'.join(label_bits)}",
+                'username': cluster['username'] or None,
+                'service': cluster['service'] or None,
+                'credential_hash': cluster['credential_hash'],
+                'hosts': hosts,
+                'host_count': len(hosts),
+            })
+
+        results.sort(key=lambda item: (-item['host_count'], item['label']))
+        return results

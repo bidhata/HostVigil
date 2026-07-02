@@ -19,9 +19,8 @@ import logging
 import sqlite3
 import json
 import hashlib
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 
 logger = logging.getLogger('hostvigil.scanner.tls_inspector')
 

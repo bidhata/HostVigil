@@ -14,15 +14,14 @@ import logging
 import sqlite3
 import json
 import numpy as np
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 from pathlib import Path
 from collections import Counter, defaultdict
 
 try:
-    from sklearn.ensemble import IsolationForest, GradientBoostingClassifier
+    from sklearn.ensemble import GradientBoostingClassifier
     from sklearn.preprocessing import StandardScaler
-    from sklearn.cluster import DBSCAN
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False

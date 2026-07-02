@@ -341,7 +341,7 @@ def cmd_kill(orchestrator, args: argparse.Namespace) -> int:
     except ProcessLookupError:
         print(f"[!] Process {pid} not found (already stopped)")
     except PermissionError:
-        print(f"[!] Permission denied - try running with elevated privileges")
+        print("[!] Permission denied - try running with elevated privileges")
         return 1
 
     # Clean up PID file
@@ -458,7 +458,7 @@ def cmd_status(orchestrator: HostVigilOrchestrator, args: argparse.Namespace) ->
     # Database stats
     db = status['database']
     if 'error' not in db:
-        print(f"\n  Database:")
+        print("\n  Database:")
         print(f"    Hosts (active/total):  {db['active_hosts']}/{db['total_hosts']}")
         print(f"    Open Ports:            {db['total_ports']}")
         print(f"    Vulnerabilities:       {db['total_vulnerabilities']}")
@@ -467,7 +467,7 @@ def cmd_status(orchestrator: HostVigilOrchestrator, args: argparse.Namespace) ->
 
     # Config summary
     cfg = status['config']
-    print(f"\n  Schedule:")
+    print("\n  Schedule:")
     print(f"    Discovery every:  {cfg['discovery_interval_hours']}h")
     print(f"    Scan every:       {cfg['scan_interval_hours']}h")
     print(f"    Nuclei every:     {cfg['nuclei_interval_hours']}h")
@@ -515,7 +515,7 @@ def cmd_export(orchestrator: HostVigilOrchestrator, args: argparse.Namespace) ->
         print(f'    Usage: httpx -l {path}')
     elif args.format == 'c2':
         results = c2.export_all()
-        print(f'[+] All C2 formats exported:')
+        print('[+] All C2 formats exported:')
         for name, path in results.items():
             print(f'    {name}: {path}')
     return 0
@@ -553,11 +553,11 @@ def cmd_diff(orchestrator: HostVigilOrchestrator, args: argparse.Namespace) -> i
     print(f"    New ports:        {result['summary']['new_ports_count']}")
     print(f"    Closed ports:     {result['summary']['closed_ports_count']}")
     if result['new_hosts']:
-        print(f"\n  New Hosts:")
+        print("\n  New Hosts:")
         for h in result['new_hosts'][:20]:
             print(f"    + {h['ip']} ({h.get('hostname') or 'unknown'}) via {h.get('discovery_method', '?')}")
     if result['new_ports']:
-        print(f"\n  New Ports:")
+        print("\n  New Ports:")
         for p in result['new_ports'][:20]:
             print(f"    + {p['ip']}:{p['port']}/{p['protocol']} ({p.get('service', '?')})")
     return 0
@@ -568,7 +568,7 @@ def cmd_paths(orchestrator: HostVigilOrchestrator, args: argparse.Namespace) -> 
     from hostvigil.attack_paths import AttackPathEngine
     engine = AttackPathEngine(orchestrator.db_path)
     result = engine.analyze()
-    print(f"\n  Attack Path Analysis")
+    print("\n  Attack Path Analysis")
     print(f"  {'=' * 40}")
     print(f"  Risk Score: {result['risk_score']:.0f}/100")
     print(f"  Initial Access Vectors: {len(result['initial_access'])}")
@@ -577,7 +577,7 @@ def cmd_paths(orchestrator: HostVigilOrchestrator, args: argparse.Namespace) -> 
     print(f"  Complete Chains: {len(result['attack_chains'])}")
     print(f"\n  Summary: {result['summary']}")
     if result['attack_chains']:
-        print(f"\n  Top Attack Chains:")
+        print("\n  Top Attack Chains:")
         for chain in result['attack_chains'][:5]:
             steps = ' \u2192 '.join(f"{s['technique'][:25]} ({s.get('host', '?')})" for s in chain['steps'])
             print(f"    [{chain['severity'].upper()}] {steps}")
@@ -798,7 +798,7 @@ def cmd_init(orchestrator_unused, args: argparse.Namespace) -> int:
 
     print()
     print(f'[+] Configuration saved to {config_path}')
-    print(f'[*] Run "python run.py daemon" to start scanning')
+    print('[*] Run "python run.py daemon" to start scanning')
     return 0
 
 
@@ -924,7 +924,7 @@ def main() -> int:
     config_path = Path(args.config)
     if not config_path.exists():
         print(f"[!] Config file not found: {config_path}")
-        print(f"[*] Create config.yaml or specify path with -c")
+        print("[*] Create config.yaml or specify path with -c")
         return 1
 
     # Initialize orchestrator

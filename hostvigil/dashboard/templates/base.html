@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}HostVigil{% endblock %}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <!-- Google Fonts - Inter -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Bootstrap Icons -->
@@ -55,6 +56,25 @@
         margin-left: 6px;
         display: inline-block;
     }
+    .dashboard-footer {
+        margin-top: auto;
+        padding: 14px 20px 18px;
+        border-top: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .dashboard-footer a {
+        color: inherit;
+        text-decoration: none;
+    }
+    .dashboard-footer a:hover {
+        color: var(--accent);
+    }
     @keyframes pulse-dot {
         0%, 100% { opacity: 1; }
         50% { opacity: 0.3; }
@@ -65,7 +85,7 @@
     <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
         <div class="sidebar-brand">
-            <i class="bi bi-shield-check"></i>
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="HostVigil" class="brand-logo">
             <span class="brand-text">HostVigil</span>
         </div>
         <div class="sidebar-nav">
@@ -148,6 +168,15 @@
         <main class="page-content">
             {% block content %}{% endblock %}
         </main>
+
+        <footer class="dashboard-footer" aria-label="Dashboard attribution">
+            <span>HostVigil by <strong>Krishnendu Paul</strong> (@bidhata)</span>
+            <span>
+                <a href="https://krishnendu.com" target="_blank" rel="noreferrer">krishnendu.com</a>
+                ·
+                <a href="https://github.com/bidhata/HostVigil" target="_blank" rel="noreferrer">GitHub</a>
+            </span>
+        </footer>
     </div>
 
     <!-- Core JS -->

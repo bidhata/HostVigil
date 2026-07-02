@@ -11,7 +11,7 @@ Compares current network state against historical data to identify:
 import sqlite3
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List
+from typing import Dict
 
 logger = logging.getLogger('hostvigil.scanner.scan_diff')
 

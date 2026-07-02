@@ -33,8 +33,7 @@ from typing import List, Dict, Optional, Tuple
 try:
     from scapy.all import (
         ARP, Ether, srp, sniff as scapy_sniff,
-        IP, UDP, DNS, DNSQR, DNSRR, NBNSQueryRequest,
-        conf as scapy_conf
+        IP, UDP, DNS, DNSQR
     )
     SCAPY_AVAILABLE = True
 except ImportError:
@@ -1506,6 +1505,7 @@ class StealthDiscovery:
             method: Discovery method used.
         """
         now = datetime.now(timezone.utc).isoformat()
+        method = (method or '').strip()
 
         with self._db_lock:
             try:
@@ -1521,6 +1521,17 @@ class StealthDiscovery:
                     host_id, existing_mac, existing_hostname = row
                     update_mac = mac if mac else existing_mac
                     update_hostname = hostname if hostname else existing_hostname
+                    existing_methods = []
+                    cursor.execute(
+                        "SELECT discovery_method FROM hosts WHERE id = ?",
+                        (host_id,)
+                    )
+                    method_row = cursor.fetchone()
+                    if method_row and method_row[0]:
+                        existing_methods = [part.strip() for part in str(method_row[0]).split(',') if part.strip()]
+                    if method and method not in existing_methods:
+                        existing_methods.append(method)
+                    update_method = ', '.join(existing_methods) if existing_methods else method
 
                     cursor.execute(
                         """
@@ -1529,7 +1540,7 @@ class StealthDiscovery:
                             discovery_method = ?, is_active = 1
                         WHERE id = ?
                         """,
-                        (update_mac, update_hostname, now, method, host_id)
+                        (update_mac, update_hostname, now, update_method, host_id)
                     )
                 else:
                     # Insert new host
@@ -1590,6 +1601,17 @@ class StealthDiscovery:
                         host_id, existing_mac, existing_hostname = row
                         update_mac = mac if mac else existing_mac
                         update_hostname = hostname if hostname else existing_hostname
+                        existing_methods = []
+                        cursor.execute(
+                            "SELECT discovery_method FROM hosts WHERE id = ?",
+                            (host_id,)
+                        )
+                        method_row = cursor.fetchone()
+                        if method_row and method_row[0]:
+                            existing_methods = [part.strip() for part in str(method_row[0]).split(',') if part.strip()]
+                        if host_method and host_method not in existing_methods:
+                            existing_methods.append(host_method)
+                        update_method = ', '.join(existing_methods) if existing_methods else host_method
                         cursor.execute(
                             """
                             UPDATE hosts
@@ -1597,7 +1619,7 @@ class StealthDiscovery:
                                 discovery_method = ?, is_active = 1
                             WHERE id = ?
                             """,
-                            (update_mac, update_hostname, now, host_method, host_id)
+                            (update_mac, update_hostname, now, update_method, host_id)
                         )
                     else:
                         cursor.execute(
@@ -2047,9 +2069,9 @@ class StealthDiscovery:
 
         try:
             from scapy.all import (
-                IPv6, ICMPv6ND_NS, ICMPv6NDOptSrcLLAddr,
+                IPv6, ICMPv6ND_NS,
                 ICMPv6ND_NA, ICMPv6ND_RA, Ether as Ether6,
-                sniff as scapy_sniff6, sendp, get_if_hwaddr, conf
+                sniff as scapy_sniff6, sendp
             )
         except ImportError as exc:
             logger.warning("Failed to import scapy IPv6 modules: %s", exc)
@@ -2355,7 +2377,7 @@ class StealthDiscovery:
 
         try:
             from scapy.all import (
-                DHCP, BOOTP, sniff as dhcp_sniff, UDP as ScapyUDP
+                DHCP, BOOTP, sniff as dhcp_sniff
             )
         except ImportError as exc:
             logger.warning("Failed to import scapy DHCP modules: %s", exc)

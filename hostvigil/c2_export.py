@@ -208,7 +208,7 @@ class C2Exporter:
             xml_parts.append('    <host>')
             xml_parts.append(f'      <address>{ip}</address>')
             xml_parts.append(f'      <mac>{mac}</mac>')
-            xml_parts.append(f'      <state>alive</state>')
+            xml_parts.append('      <state>alive</state>')
             xml_parts.append(f'      <name>{hostname}</name>')
             xml_parts.append(f'      <os-name>{os_name}</os-name>')
             xml_parts.append(f'      <os-family>{xml_escape(os_family)}</os-family>')
@@ -226,7 +226,7 @@ class C2Exporter:
                     xml_parts.append('        <service>')
                     xml_parts.append(f'          <port>{port_info["port"]}</port>')
                     xml_parts.append(f'          <proto>{proto}</proto>')
-                    xml_parts.append(f'          <state>open</state>')
+                    xml_parts.append('          <state>open</state>')
                     xml_parts.append(f'          <name>{service}</name>')
                     xml_parts.append(f'          <info>{banner}</info>')
                     xml_parts.append(f'          <created-at>{now}</created-at>')
@@ -378,7 +378,7 @@ class C2Exporter:
             mac = xml_escape(host['mac'])
 
             xml_parts.append('  <host>')
-            xml_parts.append(f'    <status state="up" reason="hostvigil-discovery"/>')
+            xml_parts.append('    <status state="up" reason="hostvigil-discovery"/>')
             xml_parts.append(f'    <address addr="{ip}" addrtype="ipv4"/>')
 
             if mac:
@@ -401,7 +401,7 @@ class C2Exporter:
                     banner = xml_escape(port_info['banner'][:200]) if port_info['banner'] else ''
 
                     xml_parts.append(f'      <port protocol="{proto}" portid="{port_num}">')
-                    xml_parts.append(f'        <state state="open" reason="syn-ack" reason_ttl="64"/>')
+                    xml_parts.append('        <state state="open" reason="syn-ack" reason_ttl="64"/>')
 
                     # Service info
                     svc_attrs = f'name="{service}"' if service else 'name="unknown"'
@@ -432,11 +432,11 @@ class C2Exporter:
             xml_parts.append('  </host>')
 
         # Run stats
-        xml_parts.append(f'  <runstats>')
+        xml_parts.append('  <runstats>')
         xml_parts.append(f'    <finished time="{start_ts}" '
                          f'timestr="{xml_escape(start_str)}" exit="success"/>')
         xml_parts.append(f'    <hosts up="{total_up}" down="0" total="{total_up}"/>')
-        xml_parts.append(f'  </runstats>')
+        xml_parts.append('  </runstats>')
         xml_parts.append('</nmaprun>')
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
