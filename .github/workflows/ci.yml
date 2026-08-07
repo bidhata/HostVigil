@@ -1,0 +1,115 @@
+﻿name: CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - 'data/**'
+      - 'graphify-out/**'
+      - '**/*.log'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'data/**'
+      - 'graphify-out/**'
+      - '**/*.log'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check
+        run: ruff check . --output-format=github
+
+      - name: Check formatting
+        run: ruff format --check .
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y nmap
+
+      - name: Install Python deps
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Install project
+        run: pip install -e .
+
+      - name: Run tests
+        run: pytest -v --tb=short
+
+      - name: Compile check
+        run: python -m compileall -q hostvigil run.py
+
+      - name: Verify import
+        run: python -c "from hostvigil import __version__; print(f'HostVigil {__version__}')"
+
+      - name: Verify CLI help
+        run: python run.py --help
+
+  build:
+    name: Build package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check package
+        run: |
+          pip install dist/*.whl
+          python -m hostvigil --help
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14
